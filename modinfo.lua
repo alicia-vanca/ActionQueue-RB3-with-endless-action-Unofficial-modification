@@ -1,7 +1,7 @@
-name = "ActionQueue RB3 - with endless action"
-description = ""
 author = "Cutlass / null / eXiGe / simplex(Original Author)"
-version = "2.9.03"
+version = "2.9.04"
+name = "ActionQueue RB3 - with endless action v" .. version
+description = ""
 api_version_dst = 10
 
 icon_atlas = "modicon.xml"

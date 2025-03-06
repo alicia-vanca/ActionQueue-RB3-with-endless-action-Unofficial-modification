@@ -223,7 +223,8 @@ AddActionList(
     "ERASE_PAPER",
     "PICK",
     "BOTTLE",
-	"WAX"
+    "WAX",
+    "GRAVEDIG"	-- 250304 VanCa: Added support for Wendy's skill
 )
 
 AddAction(
@@ -564,6 +565,15 @@ AddAction(
     end
 )
 
+-- 241001 VanCa: added support for lighting up trees
+AddAction(
+    "rightclick",
+    "LIGHT",
+    function(target)
+        return target:HasTag("tree")
+    end
+)
+
 --[[single]]
 AddActionList("single", "CASTSPELL", "DECORATEVASE", "REPAIR_LEAK")
 
@@ -580,7 +590,7 @@ AddActionList(
     "FERTILIZE",
     "FILL",
     "HAMMER",
-    -- "HARVEST", 241004 Vanca: harvest is long action, right?
+    "HARVEST",
     "HEAL",
     "MINE",
     "PLANT",
@@ -588,7 +598,8 @@ AddActionList(
     "TERRAFORM",
     "ADDCOMPOSTABLE",
     "DEPLOY_TILEARRIVE",
-    "PICKUP"
+    "PICKUP",
+    "LIGHT"
 )
 
 AddAction(
@@ -2877,6 +2888,9 @@ function ActionQueuer:ClearSelectedEntities()
     self.last_target_ent = nil
     for ent in pairs(self.selected_ents) do
         self:DeselectEntity(ent)
+    end	
+    for tile in pairs(self.selected_farm_tiles) do
+        self:DeselectFarmTile(tile)
     end
 end
 
