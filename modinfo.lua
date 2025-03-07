@@ -1,5 +1,5 @@
 author = "Cutlass / null / eXiGe / simplex(Original Author)"
-version = "2.9.04"
+version = "2.9.05"
 name = "ActionQueue RB3 - with endless action v" .. version
 description = ""
 api_version_dst = 10
@@ -127,6 +127,26 @@ local gridlist = {
     { description = "4x4", data = "4x4" },
 }
 
+-- 250307 VanCa: Stop watering when tile's moisture reach __%
+local stopWateringOptions = {
+    { description = "20%", data = 0.2 },
+    { description = "30%", data = 0.3 },
+    { description = "40%", data = 0.4 },
+    { description = "50%", data = 0.5 },
+    { description = "60%", data = 0.6 },
+    { description = "70%", data = 0.7 },
+    { description = "80%", data = 0.8 },
+    { description = "90%", data = 0.9 },
+    { description = "100%", data = 0.99 },
+}
+
+-- 250307 VanCa: Stop fertilizing when tile's nutrient(s) reach __%
+local stopFertilizingOptions = {
+    { description = "25%", data = 2 },
+    { description = "50%", data = 3 },
+    { description = "100%", data = 4 },
+}
+
 -- 210215 null: original BuildNumConfig() breaks on saving Double click speed for 0.15, 0.4, 0.45, and 0.5 values (they reset to 0)
 -- Created an alternative function to handle decimal step values
 -- Continue to use original BuildNumConfig() to maintain old functionality
@@ -194,6 +214,11 @@ configuration_options = {
 
     AddConfig("Farm tilling grid", "farm_grid", gridlist, "3x3", "TILL farm plots in 2x2, 3x3, or 4x4 grids"),
     -- 201221 null: change between farm Tilling grids (3x3, 4x4)
+    
+    -- 250307 VanCa: Add options to set the stopping point of Watering & Fertilizing
+    AddConfig("Stop watering at", "stopWateringAt", stopWateringOptions, 0.9, "Stop watering when the farm tile's moisture reach __%"),
+    AddConfig("Stop fertilizing at", "stopFertilizingAt", stopFertilizingOptions, 4, "Stop fertilizing when all the nutrient(s) value of the farm tile reach __%\n(match with the Fertilizer being used)"),
+    
     AddConfig(
         "Enable double snaking",
         "double_snake",
