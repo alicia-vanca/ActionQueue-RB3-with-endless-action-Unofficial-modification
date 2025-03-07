@@ -224,7 +224,7 @@ AddActionList(
     "PICK",
     "BOTTLE",
     "WAX",
-    "GRAVEDIG"	-- 250304 VanCa: Added support for Wendy's skill
+    "GRAVEDIG" -- 250304 VanCa: Added support for Wendy's skill
 )
 
 AddAction(
@@ -455,8 +455,8 @@ AddAction(
             self.selected_ents_client_memory[target] = self.selected_ents_client_memory[target] or {}
 
             return not self.selected_ents_client_memory[target].skip_this_target
-        end 
-        return false		
+        end
+        return false
     end
 )
 
@@ -571,6 +571,32 @@ AddAction(
     "LIGHT",
     function(target)
         return target:HasTag("tree")
+    end
+)
+
+-- 250307 VanCa: added "FILL" to rightclick and support switching wateringCan
+-- (when holding the wateringcan, refill is rightclick)
+AddAction(
+    "rightclick",
+    "FILL",
+    function(target, self)
+        local item_in_hand = self:GetEquippedItemInHand()
+        if item_in_hand and (item_in_hand.prefab == "wateringcan" or item_in_hand.prefab == "premiumwateringcan") then
+            if self:GetActiveItem() then
+                return false
+            elseif self:GetItemPercent(item_in_hand) == 100 then
+                DebugPrint("This watering can is full")
+                return nil ~=
+                    self:GetNewEquippedItemInHand(
+                        {"wateringcan", "premiumwateringcan"},
+                        nil,
+                        function(item)
+                            return self:GetItemPercent(item) < 100
+                        end
+                    )
+            end
+        end
+        return true
     end
 )
 
@@ -870,10 +896,24 @@ function ActionQueuer:GetAction(target, rightclick, pos)
     end
 
     local playeractionpicker = self.inst.components.playeractionpicker
+    -- Rightclick
     if rightclick then
         if target and target.prefab == "nutrients_overlay" then
+            local equip_item = self:GetEquippedItemInHand()
+            local activeItem = self:GetActiveItem()
+
             -- Watering farm tile
-            return BufferedAction(self.inst, nil, ACTIONS.POUR_WATER_GROUNDTILE, self:GetEquippedItemInHand(), pos), true
+            if
+                (equip_item and (equip_item.prefab == "wateringcan" or equip_item.prefab == "premiumwateringcan")) or
+                    (activeItem and (activeItem.prefab == "wateringcan" or activeItem.prefab == "premiumwateringcan"))
+             then
+                -- Fertilizing farm tile
+                -- Dummy action to get through validates
+                return BufferedAction(self.inst, nil, ACTIONS.POUR_WATER_GROUNDTILE, nil, pos), true
+            elseif activeItem and (activeItem:HasTag("fertilizer")) then
+                -- Dummy action to get through validates
+                return BufferedAction(self.inst, nil, ACTIONS.DEPLOY_TILEARRIVE, activeItem, pos), true
+            end
         end
         for _, act in ipairs(playeractionpicker:GetRightClickActions(pos, target)) do
             DebugPrint("check right click act:", act.action)
@@ -883,6 +923,7 @@ function ActionQueuer:GetAction(target, rightclick, pos)
             end
         end
     end
+    -- Leftclick
     for _, act in ipairs(playeractionpicker:GetLeftClickActions(pos, target)) do
         DebugPrint("check left click act:", act.action.id)
         if
@@ -1041,9 +1082,24 @@ function ActionQueuer:SendActionAndWait(act, rightclick, target)
     self:SendAction(act, rightclick, target)
     self:Wait(act.action, target)
 
-    -- 250219 VanCa: Prevent once opened Ornate Chest from being added to the selected_list again	
+    -- 250219 VanCa: Prevent once opened Ornate Chest from being added to the selected_list again
     if act.action == ACTIONS.RUMMAGE then
         self.selected_ents_client_memory[target].skip_this_target = true
+    end
+
+    -- 250307 VanCa: support switching wateringCan when refill (leftclick)
+    if act.action == ACTIONS.FILL and not rightclick then
+        local item_in_hand = self:GetEquippedItemInHand()
+        if item_in_hand and (item_in_hand.prefab == "wateringcan" or item_in_hand.prefab == "premiumwateringcan") then
+            DebugPrint("This watering can is full")
+            self:GetNewActiveItem(
+                {"wateringcan", "premiumwateringcan"},
+                nil,
+                function(item)
+                    return self:GetItemPercent(item) < 100
+                end
+            )
+        end
     end
 end
 
@@ -1325,9 +1381,9 @@ function ActionQueuer:DoubleClick(rightclick, target)
             end
         end
     elseif target.prefab == "nutrients_overlay" then
+        -- 241012 Vanca: Select nearby farm tiles (wartering, fertilizing,..)
         self:AddFarmTile(target, rightclick)
-    elseif (target.prefab == "pandoraschest" or target.prefab == "chest_mimic") and
-            target.action == ACTIONS.RUMMAGE then
+    elseif (target.prefab == "pandoraschest" or target.prefab == "chest_mimic") and target.action == ACTIONS.RUMMAGE then
         -- 250219 VanCa: Added support for RUMMAGE Ornate Chests
         for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
             if target.prefab == "pandoraschest" or target.prefab == "chest_mimic" then
@@ -1394,21 +1450,29 @@ function ActionQueuer:CherryPick(rightclick)
 
     local allEntitiesUnderMouse = TheInput:GetAllEntitiesUnderMouse()
 
-    -- (Dehydrated) Can't get any target entity when taking water from ocean, so create a dummy temporary one
     local activeItem = self:GetActiveItem()
-    if activeItem and activeItem:HasTag("bucket_empty") then
-        local pos = TheInput:GetWorldPosition()
-        DebugPrint("pos:", pos)
-        local null_target = CreateEntity()
-        null_target.prefab = "ocean_water_source"
-        null_target.entity:AddTransform()
-        null_target.Transform:SetPosition(pos:Get())
+    if activeItem then
+        if activeItem:HasTag("bucket_empty") then
+            -- (Dehydrated) Can't get any target entity when taking water from ocean, so create a dummy temporary one
+            local pos = TheInput:GetWorldPosition()
+            DebugPrint("pos:", pos)
+            local null_target = CreateEntity()
+            null_target.prefab = "ocean_water_source"
+            null_target.entity:AddTransform()
+            null_target.Transform:SetPosition(pos:Get())
 
-        table.insert(allEntitiesUnderMouse, null_target)
+            table.insert(allEntitiesUnderMouse, null_target)
+        end
     end
 
     local equip_item = self:GetEquippedItemInHand()
-    if equip_item and (equip_item.prefab == "wateringcan" or equip_item.prefab == "premiumwateringcan") then
+    if
+        (equip_item and (equip_item.prefab == "wateringcan" or equip_item.prefab == "premiumwateringcan")) or
+            (activeItem and
+                (activeItem.prefab == "wateringcan" or activeItem.prefab == "premiumwateringcan" or
+                    activeItem:HasTag("fertilizer")))
+     then
+        -- Watering, fertilizing
         local pos = TheInput:GetWorldPosition()
         for _, ent in pairs(TheWorld.Map:GetEntitiesOnTileAtPoint(pos.x, pos.y, pos.z)) do
             if ent.prefab == "nutrients_overlay" then -- Look for tile's nutrients_overlay entity, that's a farm tile
@@ -1558,12 +1622,25 @@ function ActionQueuer:OnUp(rightclick)
                     return
                 end
 
-                if active_item.replica.inventoryitem:IsDeployable(self.inst) then
-                    self:DeployToSelection(self.DeployActiveItem, GetDeploySpacing(active_item), active_item)
+                -- 250306 VanCa: Equip the ActiveItem (wateringcan) if the watering queue has been started while holding a wateringcan in ActiveItem slot
+                local equip_item = self:GetEquippedItemInHand()
+                if
+                    not (equip_item and
+                        (equip_item.prefab == "wateringcan" or equip_item.prefab == "premiumwateringcan")) and
+                        (active_item and
+                            (active_item.prefab == "wateringcan" or active_item.prefab == "premiumwateringcan"))
+                 then
+                    self.inst.replica.inventory:EquipActiveItem()
+                    -- Update equip_item
+                    equip_item = self:GetEquippedItemInHand()
                 else
-                    self:DeployToSelection(self.DropActiveItem, GetDropSpacing(active_item), active_item)
+                    if active_item.replica.inventoryitem:IsDeployable(self.inst) then
+                        self:DeployToSelection(self.DeployActiveItem, GetDeploySpacing(active_item), active_item)
+                    else
+                        self:DeployToSelection(self.DropActiveItem, GetDropSpacing(active_item), active_item)
+                    end
+                    return
                 end
-                return
             end
             local equip_item = self:GetEquippedItemInHand()
             if equip_item and (equip_item.prefab == "pitchfork" or equip_item.prefab == "goldenpitchfork") then
@@ -1616,6 +1693,210 @@ function ActionQueuer:OnUp(rightclick)
     end
 end
 
+function ActionQueuer:DeployToSelection(deploy_fn, spacing, item)
+    DebugPrint("-------------------------------------")
+    DebugPrint("DeployToSelection: deploy_fn:", deploy_fn, "spacing:", spacing, "item:", item)
+    if not self.TL then
+        return
+    end
+
+    -- 210116 null: cases for snapping positions to farm grid (Tilling, Wormwood planting on soil tiles, etc)
+    local snap_farm = false
+    if deploy_fn == self.TillAtPoint or deploy_fn == self.WormwoodPlantAtPoint then
+        snap_farm = true
+    end
+    if snap_farm then
+        if farm_grid == "4x4" then
+            spacing = 1.26 -- 210116 null: different spacing for 4x4 grid
+        elseif farm_grid == "2x2" then
+            spacing = 2 -- 210609 null: different spacing for 2x2 grid
+        end
+    end
+
+    local heading, dir = GetHeadingDir()
+    local diagonal = heading % 2 ~= 0
+    DebugPrint("Heading:", heading, "Diagonal:", diagonal, "Spacing:", spacing)
+    DebugPrint("TL:", self.TL, "TR:", self.TR, "BL:", self.BL, "BR:", self.BR)
+    local X, Z = "x", "z"
+    if dir then
+        X, Z = Z, X
+    end
+    local spacing_x = self.TL[X] > self.TR[X] and -spacing or spacing
+    local spacing_z = self.TL[Z] > self.BL[Z] and -spacing or spacing
+    local adjusted_spacing_x = diagonal and spacing * 1.4 or spacing
+    local adjusted_spacing_z = diagonal and spacing * 0.7 or spacing
+    local width = math.floor(self.TL:Dist(self.TR) / adjusted_spacing_x)
+    local height =
+        self.endless_deploy and 100 or
+        math.floor(self.TL:Dist(self.BL) / (width < 1 and adjusted_spacing_x or adjusted_spacing_z))
+    DebugPrint("Width:", width + 1, "Height:", height + 1) --since counting from 0
+    local start_x, _, start_z = self.TL:Get()
+    local terraforming = false
+
+    if
+        deploy_fn == self.WaterAtPoint or -- 201217 null: added support for Watering of farming tiles
+            deploy_fn == self.FertilizeAtPoint or -- 201223 null: added support for Fertilizing of farming tiles
+            deploy_fn == self.TerraformAtPoint or
+            item and item:HasTag("groundtile")
+     then
+        start_x, _, start_z = TheWorld.Map:GetTileCenterPoint(start_x, 0, start_z)
+        terraforming = true
+    elseif deploy_fn == self.DropActiveItem or item and (item:HasTag("wallbuilder") or item:HasTag("fencebuilder")) then
+        -- 210116 null: adjust farm grid start position + offsets (thanks to blizstorm for help)
+        start_x, start_z = math.floor(start_x) + 0.5, math.floor(start_z) + 0.5
+    elseif snap_farm then
+        -- 210709 null: fix for 3x3 alignment on medium/huge servers (different tile offsets)
+        local tilecenter = _G.Point(_G.TheWorld.Map:GetTileCenterPoint(start_x, 0, start_z)) -- center of tile
+        local tilepos = _G.Point(tilecenter.x - 2, 0, tilecenter.z - 2) -- corner of tile
+        if tilecenter.x % 4 == 0 then -- if center of tile is divisible by 4, then it's a medium/huge server
+            farm3x3_offset = farm_spacing -- adjust offset for medium/huge servers for 3x3 grid
+        end
+
+        if farm_grid == "4x4" then -- 4x4 grid
+            -- 4x4 grid: spacing = 1.26, offset/margins = 0.11
+            start_x, start_z =
+                tilepos.x + math.floor((start_x - tilepos.x) / 1.26 + 0.5) * 1.26 + 0.11 * offsets_4x4[heading].x,
+                tilepos.z + math.floor((start_z - tilepos.z) / 1.26 + 0.5) * 1.26 + 0.11 * offsets_4x4[heading].z
+        elseif farm_grid == "2x2" then -- 210609 null: 2x2 grid: spacing = 2 (4/2), offset = 1 (4/2/2)
+            start_x, start_z = math.floor(start_x / 2) * 2 + 1, math.floor(start_z / 2) * 2 + 1
+        else -- 3x3 grid: spacing = 1.333 (4/3), offset = 0.665 (4/3/2)
+            -- 210202 null: remove +0.5 floored rounding for more consistent wormwood placements (blizstorm)
+            -- 210202 null: use more precise 3x3 grid offset for better alignment at edge of maps
+            -- start_x, start_z = math.floor(start_x * 0.75 + 0.5) * 1.333 + 0.665,
+            --                    math.floor(start_z * 0.75 + 0.5) * 1.333 + 0.665
+
+            -- 210201 null: /0.75 (3/4) instead of *1.333 (4/3) to better support edge of large -1600 to 1600 maps (blizstorm)
+            -- start_x, start_z = math.floor(start_x * 0.75 + 0.5) / 0.75 + 0.665,
+            --                    math.floor(start_z * 0.75 + 0.5) / 0.75 + 0.665
+            start_x, start_z =
+                math.floor(start_x / farm_spacing) * farm_spacing + farm3x3_offset,
+                math.floor(start_z / farm_spacing) * farm_spacing + farm3x3_offset
+        end
+    elseif self.deploy_on_grid then -- 210201 null: deploy_on_grid = last to avoid conflict with farm grids (blizstorm)
+        start_x, start_z = math.floor(start_x * 2 + 0.5) * 0.5, math.floor(start_z * 2 + 0.5) * 0.5
+    end
+
+    local cur_pos = Point()
+    local count = {x = 0, y = 0, z = 0}
+    local row_swap = 1
+
+    -- 210127 null: added support for snaking within snaking for faster deployment (thanks to blizstorm)
+    local step = 1
+    local countz2 = 0
+    local countStep = {{0, 1}, {1, 0}, {0, -1}, {1, 0}}
+    if height < 1 then
+        countStep = {{1, 0}, {1, 0}, {1, 0}, {1, 0}}
+    end -- 210130 null: bliz fix (210127)
+
+    self.action_thread =
+        StartThread(
+        function()
+            self.inst:ClearBufferedAction()
+            while self.inst:IsValid() do
+                cur_pos.x = start_x + spacing_x * count.x
+                cur_pos.z = start_z + spacing_z * count.z
+                if diagonal then
+                    if width < 1 then
+                        if count[Z] > height then
+                            break
+                        end
+                        count[X] = count[X] - 1
+                        count[Z] = count[Z] + 1
+                    else
+                        local row = math.floor(count.y / 2)
+                        if count[X] + row > width or count[X] + row < 0 then
+                            count.y = count.y + 1
+                            if count.y > height then
+                                break
+                            end
+                            row_swap = -row_swap
+                            count[X] = count[X] + row_swap - 1
+                            count[Z] = count[Z] + row_swap
+                            cur_pos.x = start_x + spacing_x * count.x
+                            cur_pos.z = start_z + spacing_z * count.z
+                        end
+                        count.x = count.x + row_swap
+                        count.z = count.z + row_swap
+                    end
+                else
+                    if double_snake then -- 210127 null: snake within snake deployment (thanks to blizstorm)
+                        if count[X] > width or count[X] < 0 then
+                            countz2 = countz2 + 2 -- assume first that next major row can be progressed since this is the case most of the time (blizstorm)
+
+                            -- if countz2 > height then -- old bliz code (210115)
+                            if countz2 + 1 > height then -- 210130 null: bliz fix (210127)
+                                -- if countz2 - 1 > height then -- old bliz code (210115)
+                                -- if countz2 - 1 <= height then -- old bliz code (210122)
+                                if countz2 <= height then -- 210130 null: bliz fix (210127)
+                                    -- countz2 = countz2 - 1 -- old bliz code (210115)
+                                    countStep = {{1, 0}, {1, 0}, {1, 0}, {1, 0}}
+                                else
+                                    break
+                                end
+                            end
+
+                            step = 1
+                            row_swap = -row_swap
+                            count[X] = count[X] + row_swap
+                            count[Z] = countz2
+                            cur_pos.x = start_x + spacing_x * count.x
+                            cur_pos.z = start_z + spacing_z * count.z
+                        end
+                        count[X] = count[X] + countStep[step][1] * row_swap
+                        count[Z] = count[Z] + countStep[step][2]
+                        step = step % 4 + 1
+                    else -- Regular snaking deployment
+                        if count[X] > width or count[X] < 0 then
+                            count[Z] = count[Z] + 1
+                            if count[Z] > height then
+                                break
+                            end
+                            row_swap = -row_swap
+                            count[X] = count[X] + row_swap
+                            cur_pos.x = start_x + spacing_x * count.x
+                            cur_pos.z = start_z + spacing_z * count.z
+                        end
+                        count[X] = count[X] + row_swap
+                    end
+                end
+
+                local accessible_pos = cur_pos
+                if terraforming then
+                    -- 210116 null: not needed anymore
+                    -- elseif snap_farm then -- 210116 null: (Tilling, Wormwood planting on soil tile)
+                    --     accessible_pos = GetSnapTillPosition(cur_pos) -- Snap pos to farm grid
+                    accessible_pos = GetAccessibleTilePosition(cur_pos)
+                elseif deploy_fn == self.TillAtPoint then -- 210117 null: check if pos already Tilled
+                    for _, ent in pairs(TheSim:FindEntities(cur_pos.x, 0, cur_pos.z, 0.005, {"soil"})) do
+                        if not ent:HasTag("NOCLICK") then
+                            accessible_pos = false
+                            break
+                        end -- Skip Tilling this position
+                    end
+                end
+
+                DebugPrint("Current Position:", accessible_pos or "skipped")
+                if accessible_pos then
+                    if not deploy_fn(self, accessible_pos, item) then
+                        break
+                    end
+                end
+            end
+            self:ClearActionThread()
+            self:ClearSelectedEntities()
+            self.inst:DoTaskInTime(
+                0,
+                function()
+                    if next(self.selected_ents) then
+                        self:ApplyToSelection()
+                    end
+                end
+            )
+        end,
+        action_thread_id
+    )
+end
+
 function ActionQueuer:IsWalkButtonDown()
     DebugPrint("-------------------------------------")
     DebugPrint("IsWalkButtonDown")
@@ -1652,7 +1933,8 @@ function ActionQueuer:GetEquippedItemInHand()
 end
 
 -- Get item durable, reference: 呼吸
-function ActionQueuer:GetPercent(inst)
+-- i: [0 ~ 100]%
+function ActionQueuer:GetItemPercent(inst)
     local i = 100
     local classified =
         type(inst) == "table" and inst.replica and inst.replica.inventoryitem and inst.replica.inventoryitem.classified
@@ -1888,14 +2170,14 @@ function ActionQueuer:WaterAtPoint(pos, item, endless_deploy)
     if not item_in_hand then
         return false
     end
-    if self:GetPercent(item_in_hand) == 0 then
+    if self:GetItemPercent(item_in_hand) == 0 then
         DebugPrint("This watering can is emptied")
         if
             not self:GetNewEquippedItemInHand(
                 {"wateringcan", "premiumwateringcan"},
                 nil,
                 function(item)
-                    return self:GetPercent(item) > 0
+                    return self:GetItemPercent(item) > 0
                 end
             )
          then
@@ -1926,15 +2208,17 @@ function ActionQueuer:WaterAtPoint(pos, item, endless_deploy)
             -- Moisture constantly drains, so it doesn't stay at 100% for long, hence 99% limit was previously used.
             -- However, there are some cases where you end up watering 5 times. Each = 25%, so 5th time = only watering 1%
             -- So blizstorm suggested using a 90% limit instead.
-            while self.inst:IsValid() and moisture.AnimState:GetCurrentAnimationTime() < 0.9 do -- Water tile until 90% full
+
+            -- 250307 VanCa: Added options in the mod settings to allow users to choose what the limits should be.
+            while self.inst:IsValid() and moisture.AnimState:GetCurrentAnimationTime() < TUNING.STOP_WATERING_AT do -- Water tile until 90% full
                 -- 241012 Vanca: added support for automatically replacing emptied watering can
-                if self:GetPercent(self:GetEquippedItemInHand()) == 0 then
+                if self:GetItemPercent(self:GetEquippedItemInHand()) == 0 then
                     DebugPrint("This watering can is emptied")
                     self:GetNewEquippedItemInHand(
                         {"wateringcan", "premiumwateringcan"},
                         nil,
                         function(item)
-                            return self:GetPercent(item) > 0
+                            return self:GetItemPercent(item) > 0
                         end
                     )
                 end
@@ -1942,10 +2226,41 @@ function ActionQueuer:WaterAtPoint(pos, item, endless_deploy)
                 DebugPrint("Tile's water:", moisture.AnimState:GetCurrentAnimationTime())
             end
         else
+            -- endless_deploy Off
+            -- Default behavor, water the tile once.
             self:SendActionAndWait(act, true)
         end
     end
     return true
+end
+
+-- 210107 null: added support for Watering of farming tile until moisture is full
+-- 241012 VanCa: Modify WaterTile & WaterAtPoint to watering multi tiles until full moisture in Endless Deploy mode
+function ActionQueuer:WaterTile(item)
+    DebugPrint("-------------------------------------")
+    DebugPrint("WaterTile: item:", tostring(item))
+    if not item or not self:GetEquippedItemInHand() then
+        return
+    end
+
+    self.action_thread =
+        StartThread(
+        function()
+            self.inst:ClearBufferedAction()
+            while self.inst:IsValid() do
+                local closest_tile = self:GetClosestTile()
+                if not closest_tile then
+                    break
+                end
+                self:WaterAtPoint(closest_tile:GetPosition(), item, true)
+                self:DeselectFarmTile(closest_tile)
+            end
+
+            self:ClearActionThread()
+            self:ClearSelectedEntities()
+        end,
+        action_thread_id
+    )
 end
 
 -- 201217 null: added support for Tilling of farming tiles
@@ -1963,26 +2278,136 @@ function ActionQueuer:TillAtPoint(pos, item)
     return true
 end
 
--- 201223 null: added support for Fertilizing of farming tiles
-function ActionQueuer:FertilizeAtPoint(pos, item, fast)
-    DebugPrint("-------------------------------------")
-    DebugPrint("FertilizeAtPoint: pos:", pos, "item:", item, "fast:", fast)
-    local x, y, z = pos:Get()
-    if not self:GetActiveItem() then
-        return false
-    end
-    if TheWorld.Map:IsFarmableSoilAtPoint(x, y, z) then
-        local act = BufferedAction(self.inst, nil, ACTIONS.DEPLOY_TILEARRIVE, item, pos)
-        self:SendActionAndWait(act, true)
-
-        -- 201225 null: extra delay needed when Fertilizing through SelectionBox()
-        if not fast then
-            while not self.inst:HasTag("idle") do
-                Sleep(self.action_delay)
-            end
+-- 250306 VanCa: Gets fertilizer prefab's nutrient values
+-- reference: Insight mod
+function GetNutrientValue(prefab)
+    local FERTILIZER_DEFS =
+        (TheSim:GetGameID() == "DST" and CurrentRelease.GreaterOrEqualTo("R14_FARMING_REAPWHATYOUSOW") and
+        require("prefabs/fertilizer_nutrient_defs").FERTILIZER_DEFS) or
+        {}
+    for _prefab, data in pairs(FERTILIZER_DEFS) do
+        if _prefab == prefab then
+            -- {Growth formula, Compost, Manure}
+            return data.nutrients
         end
     end
+end
+
+-- 250306 VanCa: Get nutrient levels.
+-- reference: 呼吸
+function GetFertilities(tile)
+    DebugPrint("GetFertilities: tile:", tile)
+    local nutrientlevels = tile and tile.nutrientlevels and tile.nutrientlevels:value()
+    -- 4：100% 3：50% 2:25% 1:%1 0:0%
+    return nutrientlevels and
+        {
+            bit.band(nutrientlevels, 7), -- Growth formula
+            bit.band(bit.rshift(nutrientlevels, 3), 7), -- Compost
+            bit.band(bit.rshift(nutrientlevels, 6), 7) -- Manure
+        }
+end
+
+-- 201223 null: added support for Fertilizing of farming tiles
+-- 250307 VanCa: Stop Fertilizing when the tile has had enough of that fertilizer's nutrient(s)
+function ActionQueuer:FertilizeAtPoint(pos, item, fast, endless_deploy)
+    DebugPrint("-------------------------------------")
+    DebugPrint("FertilizeAtPoint: pos:", pos, "item:", item, "fast:", fast)
+    local activeItem = self:GetActiveItem()
+    if not activeItem then
+        return false
+    end
+    for _, ent in pairs(TheWorld.Map:GetEntitiesOnTileAtPoint(pos.x, pos.y, pos.z)) do
+        if ent.prefab == "nutrients_overlay" then
+            local act = BufferedAction(self.inst, nil, ACTIONS.DEPLOY_TILEARRIVE, item, pos)
+            local tileNutrients = GetFertilities(ent)
+            local fertilizerNutrients = GetNutrientValue(activeItem.prefab)
+            -- If input endless_deploy is nil then use self.endless_deploy
+            endless_deploy = endless_deploy or self.endless_deploy
+            if endless_deploy then
+                -- 250307 VanCa: Added options in the mod settings to allow users to choose what the limits should be.
+                while (fertilizerNutrients[1] > 0 and tileNutrients[1] < TUNING.STOP_FERTILIZING_AT) or
+                    (fertilizerNutrients[2] > 0 and tileNutrients[2] < TUNING.STOP_FERTILIZING_AT) or
+                    (fertilizerNutrients[3] > 0 and tileNutrients[3] < TUNING.STOP_FERTILIZING_AT) do
+                    -- while a tile's nutrient < Limit
+                    self:SendActionAndWait(act, true)
+
+                    -- Pickup a new stack of fertilizer
+                    if not self:GetActiveItem() then
+                        DebugPrint("Pickup a new stack of fertilizer")
+                        if not self:GetNewActiveItem(activeItem.prefab) then
+                            return false
+                        end
+                    end
+
+                    -- 201225 null: extra delay needed when Fertilizing through SelectionBox()
+                    if not fast then
+                        while not self.inst:HasTag("idle") do
+                            Sleep(self.action_delay)
+                        end
+                    end
+
+                    -- Update the tile's nutrients info
+                    tileNutrients = GetFertilities(ent)
+                end
+            else
+                -- endless_deploy Off
+                -- Default behavor, fertilize the tile once.
+                if
+                    (fertilizerNutrients[1] > 0 and tileNutrients[1] < 4) or
+                        (fertilizerNutrients[2] > 0 and tileNutrients[2] < 4) or
+                        (fertilizerNutrients[3] > 0 and tileNutrients[3] < 4)
+                 then
+                    self:SendActionAndWait(act, true)
+
+                    -- 201225 null: extra delay needed when Fertilizing through SelectionBox()
+                    if not fast then
+                        while not self.inst:HasTag("idle") do
+                            Sleep(self.action_delay)
+                        end
+                    end
+                end
+            end
+        end
+        break
+    end
     return true
+end
+
+-- 201224 null: added support for Fertilizing of farming tiles
+function ActionQueuer:FertilizeTile(pos, item)
+    DebugPrint("-------------------------------------")
+    DebugPrint("FertilizeTile: pos:", pos, "item:", item)
+    -- 201225 null: make sure pos and item exist, and tile = farmable before continuing
+    if not pos or not item or not TheWorld.Map:IsFarmableSoilAtPoint(pos.x, 0, pos.z) then
+        return
+    end
+
+    self.action_thread =
+        StartThread(
+        function()
+            self.inst:ClearBufferedAction()
+            while self.inst:IsValid() do
+                local closest_tile = self:GetClosestTile()
+                if not closest_tile then
+                    break
+                end
+                -- 250307 Vanca: pickup a new stack of fertilizer
+                if not self:GetActiveItem() then
+                    DebugPrint("Pickup a new stack of fertilizer")
+                    if not self:GetNewActiveItem(activeItem.prefab) then
+                        break
+                    end
+                end
+                if not self:FertilizeAtPoint(closest_tile:GetPosition(), item, true, true) then
+                    break
+                end
+                self:DeselectFarmTile(closest_tile)
+            end
+            self:ClearActionThread()
+            self:ClearSelectedEntities()
+        end,
+        action_thread_id
+    )
 end
 
 -- 210103 null: added support for Wormwood planting inside farm soil grids
@@ -2202,6 +2627,20 @@ function ActionQueuer:GetClosestTarget(active_item)
                             end
                         end
                     end
+                elseif
+                    ent:HasTag("watersource") and active_item and
+                        (active_item.prefab == "wateringcan" or active_item.prefab == "premiumwateringcan") and
+                        not self:GetActiveItem()
+                 then
+                    -- 250307 VanCa: support switching wateringCan when refilling (leftclick)
+                    active_item =
+                        self:GetNewActiveItem(
+                        {"wateringcan", "premiumwateringcan"},
+                        nil,
+                        function(item)
+                            return self:GetItemPercent(item) < 100
+                        end
+                    ) or active_item
                 end
 
                 if not skip_ent then
@@ -2360,7 +2799,23 @@ function ActionQueuer:ApplyToSelection()
                                     end --queue can exit without this delay
                                     if not self:GetActiveItem() then
                                         DebugPrint("Try to get new active item")
-                                        active_item = self:GetNewActiveItem(active_item.prefab) or active_item
+                                        if
+                                            (active_item.prefab == "wateringcan" or
+                                                active_item.prefab == "premiumwateringcan") and
+                                                target:HasTag("watersource")
+                                         then
+                                            -- 250307 VanCa: support switching wateringCan when refilling (leftclick)
+                                            active_item =
+                                                self:GetNewActiveItem(
+                                                {"wateringcan", "premiumwateringcan"},
+                                                nil,
+                                                function(item)
+                                                    return self:GetItemPercent(item) < 100
+                                                end
+                                            ) or active_item
+                                        else
+                                            active_item = self:GetNewActiveItem(active_item.prefab) or active_item
+                                        end
                                         -- Sleep(self.action_delay)
                                         act = self:GetAction(target, rightclick, pos)
                                     end
@@ -2434,263 +2889,6 @@ function ActionQueuer:ApplyToSelection()
                 self.last_target_ent = nil
                 self.selected_ents_client_memory = {}
             end
-            self:ClearActionThread()
-        end,
-        action_thread_id
-    )
-end
-
-function ActionQueuer:DeployToSelection(deploy_fn, spacing, item)
-    DebugPrint("-------------------------------------")
-    DebugPrint("DeployToSelection: deploy_fn:", deploy_fn, "spacing:", spacing, "item:", item)
-    if not self.TL then
-        return
-    end
-
-    -- 210116 null: cases for snapping positions to farm grid (Tilling, Wormwood planting on soil tiles, etc)
-    local snap_farm = false
-    if deploy_fn == self.TillAtPoint or deploy_fn == self.WormwoodPlantAtPoint then
-        snap_farm = true
-    end
-    if snap_farm then
-        if farm_grid == "4x4" then
-            spacing = 1.26 -- 210116 null: different spacing for 4x4 grid
-        elseif farm_grid == "2x2" then
-            spacing = 2 -- 210609 null: different spacing for 2x2 grid
-        end
-    end
-
-    local heading, dir = GetHeadingDir()
-    local diagonal = heading % 2 ~= 0
-    DebugPrint("Heading:", heading, "Diagonal:", diagonal, "Spacing:", spacing)
-    DebugPrint("TL:", self.TL, "TR:", self.TR, "BL:", self.BL, "BR:", self.BR)
-    local X, Z = "x", "z"
-    if dir then
-        X, Z = Z, X
-    end
-    local spacing_x = self.TL[X] > self.TR[X] and -spacing or spacing
-    local spacing_z = self.TL[Z] > self.BL[Z] and -spacing or spacing
-    local adjusted_spacing_x = diagonal and spacing * 1.4 or spacing
-    local adjusted_spacing_z = diagonal and spacing * 0.7 or spacing
-    local width = math.floor(self.TL:Dist(self.TR) / adjusted_spacing_x)
-    local height =
-        self.endless_deploy and 100 or
-        math.floor(self.TL:Dist(self.BL) / (width < 1 and adjusted_spacing_x or adjusted_spacing_z))
-    DebugPrint("Width:", width + 1, "Height:", height + 1) --since counting from 0
-    local start_x, _, start_z = self.TL:Get()
-    local terraforming = false
-
-    if
-        deploy_fn == self.WaterAtPoint or -- 201217 null: added support for Watering of farming tiles
-            deploy_fn == self.FertilizeAtPoint or -- 201223 null: added support for Fertilizing of farming tiles
-            deploy_fn == self.TerraformAtPoint or
-            item and item:HasTag("groundtile")
-     then
-        start_x, _, start_z = TheWorld.Map:GetTileCenterPoint(start_x, 0, start_z)
-        terraforming = true
-    elseif deploy_fn == self.DropActiveItem or item and (item:HasTag("wallbuilder") or item:HasTag("fencebuilder")) then
-        -- 210116 null: adjust farm grid start position + offsets (thanks to blizstorm for help)
-        start_x, start_z = math.floor(start_x) + 0.5, math.floor(start_z) + 0.5
-    elseif snap_farm then
-        -- 210709 null: fix for 3x3 alignment on medium/huge servers (different tile offsets)
-        local tilecenter = _G.Point(_G.TheWorld.Map:GetTileCenterPoint(start_x, 0, start_z)) -- center of tile
-        local tilepos = _G.Point(tilecenter.x - 2, 0, tilecenter.z - 2) -- corner of tile
-        if tilecenter.x % 4 == 0 then -- if center of tile is divisible by 4, then it's a medium/huge server
-            farm3x3_offset = farm_spacing -- adjust offset for medium/huge servers for 3x3 grid
-        end
-
-        if farm_grid == "4x4" then -- 4x4 grid
-            -- 4x4 grid: spacing = 1.26, offset/margins = 0.11
-            start_x, start_z =
-                tilepos.x + math.floor((start_x - tilepos.x) / 1.26 + 0.5) * 1.26 + 0.11 * offsets_4x4[heading].x,
-                tilepos.z + math.floor((start_z - tilepos.z) / 1.26 + 0.5) * 1.26 + 0.11 * offsets_4x4[heading].z
-        elseif farm_grid == "2x2" then -- 210609 null: 2x2 grid: spacing = 2 (4/2), offset = 1 (4/2/2)
-            start_x, start_z = math.floor(start_x / 2) * 2 + 1, math.floor(start_z / 2) * 2 + 1
-        else -- 3x3 grid: spacing = 1.333 (4/3), offset = 0.665 (4/3/2)
-            -- 210202 null: remove +0.5 floored rounding for more consistent wormwood placements (blizstorm)
-            -- 210202 null: use more precise 3x3 grid offset for better alignment at edge of maps
-            -- start_x, start_z = math.floor(start_x * 0.75 + 0.5) * 1.333 + 0.665,
-            --                    math.floor(start_z * 0.75 + 0.5) * 1.333 + 0.665
-
-            -- 210201 null: /0.75 (3/4) instead of *1.333 (4/3) to better support edge of large -1600 to 1600 maps (blizstorm)
-            -- start_x, start_z = math.floor(start_x * 0.75 + 0.5) / 0.75 + 0.665,
-            --                    math.floor(start_z * 0.75 + 0.5) / 0.75 + 0.665
-            start_x, start_z =
-                math.floor(start_x / farm_spacing) * farm_spacing + farm3x3_offset,
-                math.floor(start_z / farm_spacing) * farm_spacing + farm3x3_offset
-        end
-    elseif self.deploy_on_grid then -- 210201 null: deploy_on_grid = last to avoid conflict with farm grids (blizstorm)
-        start_x, start_z = math.floor(start_x * 2 + 0.5) * 0.5, math.floor(start_z * 2 + 0.5) * 0.5
-    end
-
-    local cur_pos = Point()
-    local count = {x = 0, y = 0, z = 0}
-    local row_swap = 1
-
-    -- 210127 null: added support for snaking within snaking for faster deployment (thanks to blizstorm)
-    local step = 1
-    local countz2 = 0
-    local countStep = {{0, 1}, {1, 0}, {0, -1}, {1, 0}}
-    if height < 1 then
-        countStep = {{1, 0}, {1, 0}, {1, 0}, {1, 0}}
-    end -- 210130 null: bliz fix (210127)
-
-    self.action_thread =
-        StartThread(
-        function()
-            self.inst:ClearBufferedAction()
-            while self.inst:IsValid() do
-                cur_pos.x = start_x + spacing_x * count.x
-                cur_pos.z = start_z + spacing_z * count.z
-                if diagonal then
-                    if width < 1 then
-                        if count[Z] > height then
-                            break
-                        end
-                        count[X] = count[X] - 1
-                        count[Z] = count[Z] + 1
-                    else
-                        local row = math.floor(count.y / 2)
-                        if count[X] + row > width or count[X] + row < 0 then
-                            count.y = count.y + 1
-                            if count.y > height then
-                                break
-                            end
-                            row_swap = -row_swap
-                            count[X] = count[X] + row_swap - 1
-                            count[Z] = count[Z] + row_swap
-                            cur_pos.x = start_x + spacing_x * count.x
-                            cur_pos.z = start_z + spacing_z * count.z
-                        end
-                        count.x = count.x + row_swap
-                        count.z = count.z + row_swap
-                    end
-                else
-                    if double_snake then -- 210127 null: snake within snake deployment (thanks to blizstorm)
-                        if count[X] > width or count[X] < 0 then
-                            countz2 = countz2 + 2 -- assume first that next major row can be progressed since this is the case most of the time (blizstorm)
-
-                            -- if countz2 > height then -- old bliz code (210115)
-                            if countz2 + 1 > height then -- 210130 null: bliz fix (210127)
-                                -- if countz2 - 1 > height then -- old bliz code (210115)
-                                -- if countz2 - 1 <= height then -- old bliz code (210122)
-                                if countz2 <= height then -- 210130 null: bliz fix (210127)
-                                    -- countz2 = countz2 - 1 -- old bliz code (210115)
-                                    countStep = {{1, 0}, {1, 0}, {1, 0}, {1, 0}}
-                                else
-                                    break
-                                end
-                            end
-
-                            step = 1
-                            row_swap = -row_swap
-                            count[X] = count[X] + row_swap
-                            count[Z] = countz2
-                            cur_pos.x = start_x + spacing_x * count.x
-                            cur_pos.z = start_z + spacing_z * count.z
-                        end
-                        count[X] = count[X] + countStep[step][1] * row_swap
-                        count[Z] = count[Z] + countStep[step][2]
-                        step = step % 4 + 1
-                    else -- Regular snaking deployment
-                        if count[X] > width or count[X] < 0 then
-                            count[Z] = count[Z] + 1
-                            if count[Z] > height then
-                                break
-                            end
-                            row_swap = -row_swap
-                            count[X] = count[X] + row_swap
-                            cur_pos.x = start_x + spacing_x * count.x
-                            cur_pos.z = start_z + spacing_z * count.z
-                        end
-                        count[X] = count[X] + row_swap
-                    end
-                end
-
-                local accessible_pos = cur_pos
-                if terraforming then
-                    -- 210116 null: not needed anymore
-                    -- elseif snap_farm then -- 210116 null: (Tilling, Wormwood planting on soil tile)
-                    --     accessible_pos = GetSnapTillPosition(cur_pos) -- Snap pos to farm grid
-                    accessible_pos = GetAccessibleTilePosition(cur_pos)
-                elseif deploy_fn == self.TillAtPoint then -- 210117 null: check if pos already Tilled
-                    for _, ent in pairs(TheSim:FindEntities(cur_pos.x, 0, cur_pos.z, 0.005, {"soil"})) do
-                        if not ent:HasTag("NOCLICK") then
-                            accessible_pos = false
-                            break
-                        end -- Skip Tilling this position
-                    end
-                end
-
-                DebugPrint("Current Position:", accessible_pos or "skipped")
-                if accessible_pos then
-                    if not deploy_fn(self, accessible_pos, item) then
-                        break
-                    end
-                end
-            end
-            self:ClearActionThread()
-            self.inst:DoTaskInTime(
-                0,
-                function()
-                    if next(self.selected_ents) then
-                        self:ApplyToSelection()
-                    end
-                end
-            )
-        end,
-        action_thread_id
-    )
-end
-
--- 201224 null: added support for Fertilizing of farming tiles
-function ActionQueuer:FertilizeTile(pos, item)
-    DebugPrint("-------------------------------------")
-    DebugPrint("FertilizeTile: pos:", pos, "item:", item)
-    -- 201225 null: make sure pos and item exist, and tile = farmable before continuing
-    if not pos or not item or not TheWorld.Map:IsFarmableSoilAtPoint(pos.x, 0, pos.z) then
-        return
-    end
-
-    self.action_thread =
-        StartThread(
-        function()
-            self.inst:ClearBufferedAction()
-            while self.inst:IsValid() and self:GetActiveItem() do
-                if not self:FertilizeAtPoint(pos, item, true) then
-                    break
-                end
-            end
-            self:ClearActionThread()
-        end,
-        action_thread_id
-    )
-end
-
--- 210107 null: added support for Watering of farming tile until moisture is full
--- 241012 VanCa: Modify WaterTile & WaterAtPoint to watering multi tiles until full moisture in Endless Deploy mode
-function ActionQueuer:WaterTile(item)
-    DebugPrint("-------------------------------------")
-    DebugPrint("WaterTile: item:", tostring(item))
-    if not item or not self:GetEquippedItemInHand() then
-        return
-    end
-
-    self.action_thread =
-        StartThread(
-        function()
-            self.inst:ClearBufferedAction()
-            while self.inst:IsValid() do
-                local closest_tile = self:GetClosestTile()
-                if not closest_tile then
-                    break
-                end
-                self:WaterAtPoint(closest_tile:GetPosition(), item, true)
-                self:DeselectFarmTile(closest_tile)
-            end
-
-            self.drag_click_selected_flag = false
-            self.double_click_flag = false
             self:ClearActionThread()
         end,
         action_thread_id
@@ -2888,7 +3086,7 @@ function ActionQueuer:ClearSelectedEntities()
     self.last_target_ent = nil
     for ent in pairs(self.selected_ents) do
         self:DeselectEntity(ent)
-    end	
+    end
     for tile in pairs(self.selected_farm_tiles) do
         self:DeselectFarmTile(tile)
     end

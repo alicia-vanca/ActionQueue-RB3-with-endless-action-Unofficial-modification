@@ -2,6 +2,10 @@ local _G = GLOBAL
 if _G.TheNet:IsDedicated() or _G.TheNet:GetServerGameMode() == "lavaarena" then return end
 TUNING.ACTION_QUEUE_DEBUG_MODE = GetModConfigData("debug_mode")
 
+-- 250307 VanCa: Added options in the mod settings to allow users to choose what the limits should be.
+TUNING.STOP_WATERING_AT = GetModConfigData("stopWateringAt")
+TUNING.STOP_FERTILIZING_AT = GetModConfigData("stopFertilizingAt")
+
 local SpawnPrefab = _G.SpawnPrefab
 local TheInput = _G.TheInput
 local unpack = _G.unpack
