@@ -1,5 +1,5 @@
 author = "Cutlass / null / eXiGe / simplex(Original Author)"
-version = "2.9.05"
+version = "2.9.06"
 name = "ActionQueue RB3 - with endless action v" .. version
 description = ""
 api_version_dst = 10
@@ -217,7 +217,7 @@ configuration_options = {
     
     -- 250307 VanCa: Add options to set the stopping point of Watering & Fertilizing
     AddConfig("Stop watering at", "stopWateringAt", stopWateringOptions, 0.9, "Stop watering when the farm tile's moisture reach __%"),
-    AddConfig("Stop fertilizing at", "stopFertilizingAt", stopFertilizingOptions, 4, "Stop fertilizing when all the nutrient(s) value of the farm tile reach __%\n(match with the Fertilizer being used)"),
+    AddConfig("Stop fertilizing at", "stopFertilizingAt", stopFertilizingOptions, 3, "Stop fertilizing when all the nutrient(s) value of the farm tile reach __%\n(match with the Fertilizer being used)"),
     
     AddConfig(
         "Enable double snaking",

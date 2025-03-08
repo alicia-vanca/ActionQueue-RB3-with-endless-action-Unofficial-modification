@@ -2081,8 +2081,11 @@ function ActionQueuer:GetNewActiveItem(allowed_prefabs, tags_required, validate_
     if item_data then
         DebugPrint("item_data:", item_data)
         local container = self:GetContainer(item_data.cont)
-        self.inst.replica.inventory:ReturnActiveItem()
-        container:TakeActiveItemFromAllOfSlot(item_data.slot)
+        repeat
+            self.inst.replica.inventory:ReturnActiveItem()
+            self:Wait()
+            container:TakeActiveItemFromAllOfSlot(item_data.slot)
+        until self:GetActiveItem() == item_data.item
         DebugPrint("GetNewActiveItem - Done")
         return item_data.item
     end
@@ -2641,6 +2644,18 @@ function ActionQueuer:GetClosestTarget(active_item)
                             return self:GetItemPercent(item) < 100
                         end
                     ) or active_item
+                elseif ent.prefab == "gravestone" and active_item and active_item.prefab == "graveurn" then
+                    -- 250304 VanCa: Auto switch to unused graveurn when 'GRAVEDIG'ing with Wendy skill
+                    if holding_item and holding_item.prefab == "graveurn" and holding_item:HasTag("deployable") then
+                        active_item =
+                            self:GetNewActiveItem(
+                            {"graveurn"},
+                            nil,
+                            function(item)
+                                return not item:HasTag("deployable")
+                            end
+                        ) or active_item
+                    end
                 end
 
                 if not skip_ent then
