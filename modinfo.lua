@@ -1,5 +1,5 @@
 author = "Cutlass / null / eXiGe / simplex(Original Author)"
-version = "2.9.06"
+version = "2.9.07"
 name = "ActionQueue RB3 - with endless action v" .. version
 description = ""
 api_version_dst = 10
