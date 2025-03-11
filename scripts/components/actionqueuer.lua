@@ -287,11 +287,13 @@ AddAction(
 )
 
 -- 210203 null: added support for leftclick FEED, when Walter feeds small Woby
+-- 250310 VanCa: changed to allow all to support FEED beefalo when riding
 AddAction(
     "leftclick",
     "FEED",
     function(target)
-        return target.prefab == "wobysmall"
+        -- return target.prefab == "wobysmall"
+        return true
     end
 )
 
@@ -1288,12 +1290,22 @@ function ActionQueuer:DoubleClick(rightclick, target)
     local pos = target.pos or target:GetPosition()
     local x, y, z = pos:Get()
 
-    -- 210213 null: support for differentiating Stone Fruit Bushes in Pick (idle3) vs Crumble (idle4) state (blizstorm)
     if target.prefab == "rock_avocado_bush" and (target.action == ACTIONS.PICK or target.action == ACTIONS.SCYTHE) then
+        -- 210213 null: support for differentiating Stone Fruit Bushes in Pick (idle3) vs Crumble (idle4) state (blizstorm)
         -- 210315 null: support for isolating chopping of lvl 3 trees (blizstorm / Tranoze)
         local AnimstatePick = target.AnimState:IsCurrentAnimation("idle3") and "idle3" or "idle4"
         for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
             if ent.prefab == "rock_avocado_bush" and ent.AnimState:IsCurrentAnimation(AnimstatePick) then
+                self:SelectEntity(ent, rightclick)
+            end
+        end
+    elseif
+        target.prefab == "rock_avocado_bush" and target.action == ACTIONS.FERTILIZE and
+            target.AnimState:IsCurrentAnimation("dead1")
+     then
+        -- 250310 VanCa: If fertilize dead Rock avocado, only select nearby dead Rock avocados.
+        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
+            if ent.prefab == "rock_avocado_bush" and ent.AnimState:IsCurrentAnimation("dead1") then
                 self:SelectEntity(ent, rightclick)
             end
         end
