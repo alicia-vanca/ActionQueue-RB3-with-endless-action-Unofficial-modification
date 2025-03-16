@@ -2386,6 +2386,7 @@ function ActionQueuer:FertilizeTile(pos, item)
         StartThread(
         function()
             self.inst:ClearBufferedAction()
+            local activeItem = self:GetActiveItem()
             while self.inst:IsValid() do
                 local closest_tile = self:GetClosestTile()
                 if not closest_tile then
