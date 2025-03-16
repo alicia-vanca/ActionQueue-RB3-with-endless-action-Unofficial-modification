@@ -1477,20 +1477,12 @@ function ActionQueuer:CherryPick(rightclick)
         end
     end
 
-    local equip_item = self:GetEquippedItemInHand()
-    if
-        (equip_item and (equip_item.prefab == "wateringcan" or equip_item.prefab == "premiumwateringcan")) or
-            (activeItem and
-                (activeItem.prefab == "wateringcan" or activeItem.prefab == "premiumwateringcan" or
-                    activeItem:HasTag("fertilizer")))
-     then
-        -- Watering, fertilizing
-        local pos = TheInput:GetWorldPosition()
-        for _, ent in pairs(TheWorld.Map:GetEntitiesOnTileAtPoint(pos.x, pos.y, pos.z)) do
-            if ent.prefab == "nutrients_overlay" then -- Look for tile's nutrients_overlay entity, that's a farm tile
-                table.insert(allEntitiesUnderMouse, ent)
-                break
-            end
+    -- Add farm tiles to the Entities under mouse list (needed when Watering, fertilizing)
+    local pos = TheInput:GetWorldPosition()
+    for _, ent in pairs(TheWorld.Map:GetEntitiesOnTileAtPoint(pos.x, pos.y, pos.z)) do
+        if ent.prefab == "nutrients_overlay" then -- Look for tile's nutrients_overlay entity, that's a farm tile
+            table.insert(allEntitiesUnderMouse, ent)
+            break
         end
     end
 
@@ -1636,15 +1628,8 @@ function ActionQueuer:OnUp(rightclick)
 
                 -- 250306 VanCa: Equip the ActiveItem (wateringcan) if the watering queue has been started while holding a wateringcan in ActiveItem slot
                 local equip_item = self:GetEquippedItemInHand()
-                if
-                    not (equip_item and
-                        (equip_item.prefab == "wateringcan" or equip_item.prefab == "premiumwateringcan")) and
-                        (active_item and
-                            (active_item.prefab == "wateringcan" or active_item.prefab == "premiumwateringcan"))
-                 then
+                if active_item.prefab == "wateringcan" or active_item.prefab == "premiumwateringcan" then
                     self.inst.replica.inventory:EquipActiveItem()
-                    -- Update equip_item
-                    equip_item = self:GetEquippedItemInHand()
                 else
                     if active_item.replica.inventoryitem:IsDeployable(self.inst) then
                         self:DeployToSelection(self.DeployActiveItem, GetDeploySpacing(active_item), active_item)
@@ -2206,7 +2191,7 @@ function ActionQueuer:WaterAtPoint(pos, item, endless_deploy)
         endless_deploy = endless_deploy or self.endless_deploy
         if endless_deploy then
             local moisture
-            for _, ent in pairs(_G.TheWorld.Map:GetEntitiesOnTileAtPoint(x, y, z)) do
+            for _, ent in pairs(TheWorld.Map:GetEntitiesOnTileAtPoint(x, y, z)) do
                 if ent.prefab == "nutrients_overlay" then -- Look for tile's nutrients_overlay entity, that contains moisture data
                     moisture = ent
                     break
@@ -2382,8 +2367,8 @@ function ActionQueuer:FertilizeAtPoint(pos, item, fast, endless_deploy)
                     end
                 end
             end
+            break
         end
-        break
     end
     return true
 end
@@ -2401,6 +2386,7 @@ function ActionQueuer:FertilizeTile(pos, item)
         StartThread(
         function()
             self.inst:ClearBufferedAction()
+            local activeItem = self:GetActiveItem()
             while self.inst:IsValid() do
                 local closest_tile = self:GetClosestTile()
                 if not closest_tile then
@@ -2413,7 +2399,7 @@ function ActionQueuer:FertilizeTile(pos, item)
                         break
                     end
                 end
-                if not self:FertilizeAtPoint(closest_tile:GetPosition(), item, true, true) then
+                if not self:FertilizeAtPoint(closest_tile:GetPosition(), item, false, true) then
                     break
                 end
                 self:DeselectFarmTile(closest_tile)
