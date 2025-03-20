@@ -64,14 +64,6 @@ local offsets_4x4 = {
 -- 210705 null: added support for other mods to add their own CherryPick conditions
 local mod_cherrypick_fns = {} -- This will be a list of funtions from other mods
 
-function table_length(T)
-    local count = 0
-    for _ in pairs(T) do
-        count = count + 1
-    end
-    return count
-end
-
 function table_print(tt, indent, done)
     done = done or {}
     indent = indent or 0
@@ -360,35 +352,42 @@ AddAction(
             return true
         end
         local active_item = self:GetActiveItem()
-        local container = self:GetContainer(target)
+        if target:HasTag("chest") or active_item.prefab == "featherpencil" then
+            -- 250319 VanCa: Exclude STORE chests to draw minisign with click & drag easily
+            return false
+        end
 
         -- Make sure selected_ents_client_memory[target] is not nil
         self.selected_ents_client_memory[target] = self.selected_ents_client_memory[target] or {}
 
-        if container.usespecificslotsforitems then
-            -- (distilleries)
-            local slot = container:GetSpecificSlotForItem(active_item)
-            if slot then
-                -- Appropriate ingredient
+        local container = self:GetContainer(target)
 
-                -- If the target container is opening, remember what's in the specific slot
-                if container._isopen then
-                    self.selected_ents_client_memory[target].item_in_specific_slot = container:GetItemInSlot(slot)
+        if container then
+            if container.usespecificslotsforitems then
+                -- (distilleries)
+                local slot = container:GetSpecificSlotForItem(active_item)
+                if slot then
+                    -- Appropriate ingredient
+
+                    -- If the target container is opening, remember what's in the specific slot
+                    if container._isopen then
+                        self.selected_ents_client_memory[target].item_in_specific_slot = container:GetItemInSlot(slot)
+                    end
+                    -- If specific slot is empty then return true
+                    return not self.selected_ents_client_memory[target].item_in_specific_slot
+                else
+                    -- Inappropriate ingredient
+                    return false
                 end
-                -- If specific slot is empty then return true
-                return not self.selected_ents_client_memory[target].item_in_specific_slot
             else
-                -- Inappropriate ingredient
-                return false
+                -- (kettles / breweries / crock pots)
+                -- If the target container is opening, remember whether it's full or not
+                if container._isopen then
+                    self.selected_ents_client_memory[target].is_full = container:IsFull()
+                end
+                -- Prevent STORE action when giving inappropriate thing or when it is full
+                return container:CanTakeItemInSlot(active_item) and not self.selected_ents_client_memory[target].is_full
             end
-        else
-            -- (kettles / breweries / crock pots)
-            -- If the target container is opening, remember whether it's full or not
-            if container._isopen then
-                self.selected_ents_client_memory[target].is_full = container:IsFull()
-            end
-            -- Prevent STORE action when giving inappropriate thing or when it is full
-            return container:CanTakeItemInSlot(active_item) and not self.selected_ents_client_memory[target].is_full
         end
     end
 )
@@ -1075,7 +1074,12 @@ function ActionQueuer:SendActionAndWait(act, rightclick, target)
                 self:GetNewActiveItem(active_item.prefab)
 
                 -- (GIVE action)
-                act = self:GetAction(target, false)
+                repeat
+                    act = self:GetAction(target, false)
+                    if not act or act.action.id ~= "GIVE" then
+                        self:Wait()
+                    end
+                until act and act.action.id == "GIVE"
             end
         end
     else
@@ -1214,9 +1218,16 @@ function ActionQueuer:CanModCherryPick(ent) -- Check other mods' CherryPick cond
 end
 
 -- reference: 呼吸
-function ActionQueuer:AddFarmTile(init_tile, rightclick, target_pos)
+function ActionQueuer:AddAdjacentFarmTiles(init_tile, rightclick, target_pos)
     DebugPrint("-------------------------------------")
-    DebugPrint("AddFarmTile: init_tile:", tostring(init_tile), "rightclick:", rightclick, "target_pos:", target_pos)
+    DebugPrint(
+        "AddAdjacentFarmTiles: init_tile:",
+        tostring(init_tile),
+        "rightclick:",
+        rightclick,
+        "target_pos:",
+        target_pos
+    )
     if target_pos then
         local player_pos = self.inst:GetPosition()
         local distance = math.sqrt(player_pos:DistSq(target_pos))
@@ -1230,7 +1241,8 @@ function ActionQueuer:AddFarmTile(init_tile, rightclick, target_pos)
         for _, ent in pairs(TheWorld.Map:GetEntitiesOnTileAtPoint(target_pos.x, target_pos.y, target_pos.z)) do
             if ent.prefab == "nutrients_overlay" then
                 if self:IsSelectedFarmTile(ent) then
-                    DebugPrint("Selected farm tile")
+                    -- Farm tile is already selected
+                    -- "return" to prevent overlap recursion
                     return
                 end
                 self:SelectFarmTile(ent, rightclick)
@@ -1241,9 +1253,9 @@ function ActionQueuer:AddFarmTile(init_tile, rightclick, target_pos)
         target_pos = init_tile:GetPosition()
     end
 
-    -- Trigger a recursion to select nearby (4 directions) farm tiles
+    -- Trigger a recursion to select adjacent (4 directions) farm tiles
     DebugPrint("North-West")
-    self:AddFarmTile(
+    self:AddAdjacentFarmTiles(
         init_tile,
         rightclick,
         {
@@ -1253,7 +1265,7 @@ function ActionQueuer:AddFarmTile(init_tile, rightclick, target_pos)
         }
     )
     DebugPrint("East-South")
-    self:AddFarmTile(
+    self:AddAdjacentFarmTiles(
         init_tile,
         rightclick,
         {
@@ -1263,7 +1275,7 @@ function ActionQueuer:AddFarmTile(init_tile, rightclick, target_pos)
         }
     )
     DebugPrint("South-West")
-    self:AddFarmTile(
+    self:AddAdjacentFarmTiles(
         init_tile,
         rightclick,
         {
@@ -1273,7 +1285,7 @@ function ActionQueuer:AddFarmTile(init_tile, rightclick, target_pos)
         }
     )
     DebugPrint("North-East")
-    self:AddFarmTile(
+    self:AddAdjacentFarmTiles(
         init_tile,
         rightclick,
         {
@@ -1394,7 +1406,7 @@ function ActionQueuer:DoubleClick(rightclick, target)
         end
     elseif target.prefab == "nutrients_overlay" then
         -- 241012 Vanca: Select nearby farm tiles (wartering, fertilizing,..)
-        self:AddFarmTile(target, rightclick)
+        self:AddAdjacentFarmTiles(target, rightclick)
     elseif (target.prefab == "pandoraschest" or target.prefab == "chest_mimic") and target.action == ACTIONS.RUMMAGE then
         -- 250219 VanCa: Added support for RUMMAGE Ornate Chests
         for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
@@ -2118,6 +2130,39 @@ function ActionQueuer:GetNewEquippedItemInHand(allowed_prefabs, tags_required, v
     end
 end
 
+-- 250320 VanCa: Unequip Item
+-- not_mouse: if true: can't unequip the equipment on the mouse
+-- roughly determine whether there is an empty slot within the inventory and backpack, if they're already full then return.
+-- reference: 呼吸
+function ActionQueuer:UnEquip(item, not_mouse)
+    DebugPrint("-------------------------------------")
+    DebugPrint("UnEquip item:", tostring(item), "not_mouse: ", not_mouse)
+    local invent = self.inst.replica.inventory
+    if not_mouse then
+        local equips = invent:GetEquips() or {}
+        local backpack
+        for eslot, equip in pairs(equips) do
+            backpack = equip:HasTag("backpack") and equip
+        end
+        local backpack_cont = ActionQueuer:GetContainer(backpack)
+
+        if invent:IsFull() and (not backpack_cont or backpack_cont:IsFull()) then
+            -- Inventory & backpack are full, can't unequip
+            return false
+        end
+    end
+
+    if item and item:HasTag("heavy") then
+        invent:DropItemFromInvTile(item)
+    else
+        if TheWorld and TheWorld.ismastersim then
+            getinvent():ControllerUseItemOnSelfFromInvTile(item)
+        else
+            SendRPCToServer(RPC.ControllerUseItemOnSelfFromInvTile, ACTIONS.UNEQUIP.code, item)
+        end
+    end
+end
+
 function ActionQueuer:DeployActiveItem(pos, item)
     DebugPrint("-------------------------------------")
     DebugPrint("DeployActiveItem: pos:", pos, "item:", item)
@@ -2792,6 +2837,16 @@ function ActionQueuer:ApplyToSelection()
                     DebugPrint("tool_action:", tool_action)
                     local auto_collect = CheckAllowedActions("autocollect", act.action, target, self)
                     DebugPrint("auto_collect:", auto_collect)
+
+                    -- 250320 VanCa: Server won't excute these two actions when Wormwood's holding a shovel
+                    -- He can only check ASSESSPLANTHAPPINESS while holding a shovel, so this part auto unequip it
+                    if (act.action.id == "INTERACT_WITH" or act.action.id == "PICK") and act.doer.prefab == "wormwood" then
+                        local equiped_item_in_hand = self:GetEquippedItemInHand()
+                        if equiped_item_in_hand and equiped_item_in_hand:HasTag("DIG_tool") then
+                            self:UnEquip(equiped_item_in_hand, false)
+                        end
+                    end
+
                     self:SendActionAndWait(act, rightclick, target)
                     if not CheckAllowedActions("single", act.action, target, self) then
                         DebugPrint("not a one time action")
