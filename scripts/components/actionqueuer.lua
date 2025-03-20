@@ -219,11 +219,13 @@ AddActionList(
     "GRAVEDIG" -- 250304 VanCa: Added support for Wendy's skill
 )
 
+-- 250320 VanCa: Prevent endless loop between 2 Catapults
 AddAction(
     "leftclick",
     "ACTIVATE",
     function(target)
-        return target.prefab == "dirtpile" or (target.prefab == "winona_catapult")
+        return target.prefab == "dirtpile" or
+            (target.prefab == "winona_catapult" and target.AnimState:IsCurrentAnimation("idle_off_nodir"))
     end
 )
 AddAction(
@@ -950,7 +952,9 @@ function ActionQueuer:SendAction(act, rightclick, target)
     end
     local pos = act:GetActionPoint() or self.inst:GetPosition()
     local controlmods
-    if target and target.prefab ~= "gelblob_storage" then
+
+    -- 250320 VanCa: Those item won't work with controlmods
+    if target and target.prefab ~= "gelblob_storage" and target.prefab ~= "winona_catapult" then
         controlmods = 10 --force stack and force attack
     end
 
@@ -2795,7 +2799,8 @@ function ActionQueuer:AutoCollect(pos, collect_now)
     DebugPrint("-------------------------------------")
     DebugPrint("AutoCollect: pos:", pos, "collect_now:", collect_now)
     for _, ent in pairs(TheSim:FindEntities(pos.x, 0, pos.z, 4, nil, unselectable_tags)) do
-        if IsValidEntity(ent) and not self:IsSelectedEntity(ent) then
+        -- 250320 VanCa: Prevent pickup W.I.N.bot when auto collect trigger near it
+        if IsValidEntity(ent) and ent.prefab ~= "winona_storage_robot" and not self:IsSelectedEntity(ent) then
             local act = self:GetAction(ent, false)
             if act and CheckAllowedActions("collect", act.action, ent, self) then
                 self:SelectEntity(ent, false)
