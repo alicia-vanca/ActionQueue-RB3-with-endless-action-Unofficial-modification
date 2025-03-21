@@ -225,7 +225,7 @@ AddAction(
     "ACTIVATE",
     function(target)
         return target.prefab == "dirtpile" or
-            (target.prefab == "winona_catapult" and target.AnimState:IsCurrentAnimation("idle_off_nodir"))
+            (target.prefab == "winona_catapult" and (target.AnimState:IsCurrentAnimation("idle_off_nodir") or target.AnimState:IsCurrentAnimation("idle_off")))
     end
 )
 AddAction(
@@ -1433,6 +1433,16 @@ function ActionQueuer:DoubleClick(rightclick, target)
                 end
             end
         end
+	elseif target:HasTag("farm_plant_killjoy") and target.action == ACTIONS.DIG then
+		-- 250321 VanCa: Won't select normal plants when digging up rotten farm plants
+        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
+            if ent.prefab == target.prefab and ent:HasTag("farm_plant_killjoy") then
+                local act, rightclick_ = self:GetAction(ent, rightclick)
+                if act and act.action == target.action then
+					self:SelectEntity(ent, rightclick_)
+                end
+            end
+        end
     else
         DebugPrint("Not a special target:", target.prefab)
         -- 210705 null: added support for other mods to add their own CherryPick conditions
@@ -1541,7 +1551,7 @@ function ActionQueuer:CherryPick(rightclick)
                     self.inst:DoTaskInTime(
                         self.double_click_speed,
                         function(inst)
-                            local actions_allowed_to_repeat_with_one_click = {"GIVE", "GIVEWATER", "TAKEWATER", "FILL"}
+                            local actions_allowed_to_repeat_with_one_click = {"GIVE", "GIVEWATER", "TAKEWATER", "FILL", "ADDCOMPOSTABLE"}
                             local targets_allowed_to_repeat_with_one_click = {
                                 "well",
                                 "campkettle",
