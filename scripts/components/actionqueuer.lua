@@ -225,7 +225,9 @@ AddAction(
     "ACTIVATE",
     function(target)
         return target.prefab == "dirtpile" or
-            (target.prefab == "winona_catapult" and (target.AnimState:IsCurrentAnimation("idle_off_nodir") or target.AnimState:IsCurrentAnimation("idle_off")))
+            (target.prefab == "winona_catapult" and
+                (target.AnimState:IsCurrentAnimation("idle_off_nodir") or
+                    target.AnimState:IsCurrentAnimation("idle_off")))
     end
 )
 AddAction(
@@ -1101,13 +1103,15 @@ function ActionQueuer:SendActionAndWait(act, rightclick, target)
     if act.action == ACTIONS.FILL and not rightclick then
         local item_in_hand = self:GetEquippedItemInHand()
         if item_in_hand and (item_in_hand.prefab == "wateringcan" or item_in_hand.prefab == "premiumwateringcan") then
-            DebugPrint("This watering can is full")
+            DebugPrint("The holding watering can is full")
+            -- Exclude hand slot
             self:GetNewActiveItem(
                 {"wateringcan", "premiumwateringcan"},
                 nil,
                 function(item)
                     return self:GetItemPercent(item) < 100
-                end
+                end,
+                {"container", "body", "backpack", "mouse"}
             )
         end
     end
@@ -1433,13 +1437,13 @@ function ActionQueuer:DoubleClick(rightclick, target)
                 end
             end
         end
-	elseif target:HasTag("farm_plant_killjoy") and target.action == ACTIONS.DIG then
-		-- 250321 VanCa: Won't select normal plants when digging up rotten farm plants
+    elseif target:HasTag("farm_plant_killjoy") and target.action == ACTIONS.DIG then
+        -- 250321 VanCa: Won't select normal plants when digging up rotten farm plants
         for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
             if ent.prefab == target.prefab and ent:HasTag("farm_plant_killjoy") then
                 local act, rightclick_ = self:GetAction(ent, rightclick)
                 if act and act.action == target.action then
-					self:SelectEntity(ent, rightclick_)
+                    self:SelectEntity(ent, rightclick_)
                 end
             end
         end
@@ -1551,7 +1555,13 @@ function ActionQueuer:CherryPick(rightclick)
                     self.inst:DoTaskInTime(
                         self.double_click_speed,
                         function(inst)
-                            local actions_allowed_to_repeat_with_one_click = {"GIVE", "GIVEWATER", "TAKEWATER", "FILL", "ADDCOMPOSTABLE"}
+                            local actions_allowed_to_repeat_with_one_click = {
+                                "GIVE",
+                                "GIVEWATER",
+                                "TAKEWATER",
+                                "FILL",
+                                "ADDCOMPOSTABLE"
+                            }
                             local targets_allowed_to_repeat_with_one_click = {
                                 "well",
                                 "campkettle",
@@ -1993,8 +2003,8 @@ function ActionQueuer:GetSlotsFromAll(allowed_prefabs, tags_required, validate_f
     elseif type(order) == "string" and table.contains(order_all, order) then
         order = {order}
     elseif type(order) == "table" then
+        local temp_order = {}
         for _, storage_name in pairs(order) do
-            local temp_order = {}
             if type(storage_name) == "string" and table.contains(order_all, storage_name) then
                 table.insert(temp_order, storage_name)
             end
@@ -2092,7 +2102,14 @@ end
 
 function ActionQueuer:GetNewActiveItem(allowed_prefabs, tags_required, validate_func, order)
     DebugPrint("-------------------------------------")
-    DebugPrint("GetNewActiveItem: prefabs:", allowed_prefabs, "tags_required:", tags_required)
+    DebugPrint(
+        "GetNewActiveItem: prefabs: ",
+        allowed_prefabs,
+        "tags_required: ",
+        tags_required,
+        "validate_func: ",
+        validate_func
+    )
 
     -- Make sure allowed_prefabs is a table (or nil)
     allowed_prefabs =
@@ -2693,13 +2710,15 @@ function ActionQueuer:GetClosestTarget(active_item)
                         not self:GetActiveItem()
                  then
                     -- 250307 VanCa: support switching wateringCan when refilling (leftclick)
+                    -- Exclude hand slot
                     active_item =
                         self:GetNewActiveItem(
                         {"wateringcan", "premiumwateringcan"},
                         nil,
                         function(item)
                             return self:GetItemPercent(item) < 100
-                        end
+                        end,
+                        {"container", "body", "backpack", "mouse"}
                     ) or active_item
                 elseif ent.prefab == "gravestone" and active_item and active_item.prefab == "graveurn" then
                     -- 250304 VanCa: Auto switch to unused graveurn when 'GRAVEDIG'ing with Wendy skill
@@ -2888,13 +2907,15 @@ function ActionQueuer:ApplyToSelection()
                                                 target:HasTag("watersource")
                                          then
                                             -- 250307 VanCa: support switching wateringCan when refilling (leftclick)
+                                            -- Exclude hand slot
                                             active_item =
                                                 self:GetNewActiveItem(
                                                 {"wateringcan", "premiumwateringcan"},
                                                 nil,
                                                 function(item)
                                                     return self:GetItemPercent(item) < 100
-                                                end
+                                                end,
+                                                {"container", "body", "backpack", "mouse"}
                                             ) or active_item
                                         else
                                             active_item = self:GetNewActiveItem(active_item.prefab) or active_item
