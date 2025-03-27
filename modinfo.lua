@@ -1,5 +1,8 @@
+-- 250324 VanCa: Integrate KeyBind UI by 李皓奇
+-- https://github.com/liolok/DST-KeyBind-UI
+
 author = "Cutlass / null / eXiGe / simplex(Original Author)"
-version = "2.9.14"
+version = "2.9.15"
 name = "ActionQueue RB3 - with endless action v" .. version
 description = ""
 api_version_dst = 10
@@ -29,83 +32,35 @@ description = [[
 ]]
 
 local boolean = { { description = "Yes", data = true }, { description = "No", data = false } }
-local string = ""
-local keys = {
-    "A",
-    "B",
-    "C",
-    "D",
-    "E",
-    "F",
-    "G",
-    "H",
-    "I",
-    "J",
-    "K",
-    "L",
-    "M",
-    "N",
-    "O",
-    "P",
-    "Q",
-    "R",
-    "S",
-    "T",
-    "U",
-    "V",
-    "W",
-    "X",
-    "Y",
-    "Z",
-    "F1",
-    "F2",
-    "F3",
-    "F4",
-    "F5",
-    "F6",
-    "F7",
-    "F8",
-    "F9",
-    "F10",
-    "F11",
-    "F12",
-    "LAlt",
-    "RAlt",
-    "LCtrl",
-    "RCtrl",
-    "LShift",
-    "RShift",
-    "Tab",
-    "Capslock",
-    "Space",
-    "Minus",
-    "Equals",
-    "Backspace",
-    "Insert",
-    "Home",
-    "Delete",
-    "End",
-    "Pageup",
-    "Pagedown",
-    "Print",
-    "Scrollock",
-    "Pause",
-    "Period",
-    "Slash",
-    "Semicolon",
-    "Leftbracket",
-    "Rightbracket",
-    "Backslash",
-    "Up",
-    "Down",
-    "Left",
-    "Right",
+local keyboard = { -- from STRINGS.UI.CONTROLSSCREEN.INPUTS[1] of strings.lua, need to match constants.lua too.
+    { 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12', 'Print', 'ScrolLock', 'Pause' },
+    { '1', '2', '3', '4', '5', '6', '7', '8', '9', '0' },
+    { 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z' },
+    { 'Escape', 'Tab', 'CapsLock', 'LShift', 'LCtrl', 'LSuper', 'LAlt' },
+    { 'Space', 'RAlt', 'RSuper', 'RCtrl', 'RShift', 'Enter', 'Backspace' },
+    { 'BackQuote', 'Minus', 'Equals', 'LeftBracket', 'RightBracket' },
+    { 'Backslash', 'Semicolon', 'Quote', 'Period', 'Slash' }, -- punctuation
+    { 'Up', 'Down', 'Left', 'Right', 'Insert', 'Delete', 'Home', 'End', 'PageUp', 'PageDown' }, -- navigation
 }
-local keylist = {}
-for i = 1, #keys do
-    keylist[i] = { description = keys[i], data = "KEY_" .. string.upper(keys[i]) }
+local numpad = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'Period', 'Divide', 'Multiply', 'Minus', 'Plus' }
+local mouse = { '\238\132\130', '\238\132\131', '\238\132\132' } -- Middle Mouse Button, Mouse Button 4 and 5
+local key_disabled = { description = 'Disabled', data = 'KEY_DISABLED' }
+keys = {key_disabled}
+for i = 1, #mouse do
+    keys[#keys + 1] = {description = mouse[i], data = mouse[i]}
 end
-keylist[#keylist + 1] = { description = "Disabled", data = false }
+for i = 1, #keyboard do
+    for j = 1, #keyboard[i] do
+        local key = keyboard[i][j]
+        keys[#keys + 1] = {description = key, data = "KEY_" .. key:upper()}
+    end
+    keys[#keys + 1] = key_disabled
+end
+for i = 1, #numpad do
+    local key = numpad[i]
+    keys[#keys + 1] = {description = "Numpad " .. key, data = "KEY_KP_" .. key:upper()}
+end
+
 
 local colorlist = {
     { description = "White", data = "WHITE" },
@@ -191,25 +146,30 @@ local function AddConfig(label, name, options, default, hover)
 end
 
 configuration_options = {
-    AddConfig("ActionQueue key", "action_queue_key", keylist, "KEY_LSHIFT"),
+    AddConfig("ActionQueue key", "action_queue_key", keys, "KEY_LSHIFT"),
     AddConfig("Always clear queue", "always_clear_queue", boolean, true),
     AddConfig("Selection color", "selection_color", colorlist, "WHITE"),
-    AddConfig("Selection opacity", "selection_opacity", BuildNumConfig(5, 95, 5, true), 0.5),
+
+    -- 250327 VanCa: Add highlight opacity
+    AddConfig("Selection highlight opacity", "highlight_opacity", BuildNumConfig(5, 95, 5, true), 0.5, "Opacity level of the highlight for selected entities"),
+
+    AddConfig("Selection rectangle opacity", "selection_opacity", BuildNumConfig(5, 95, 5, true), 0.5, "Opacity level of the selection rectangle when Shift + Click&Drag"),
+    
 
     -- 210215 null: fix for some values resetting back to 0 (IE 0.15, 0.4, 0.45, 0.5)
     AddConfig("Double click speed", "double_click_speed", nullBuildNumConfig(0, 0.5, 0.05), 0.3),
     -- AddConfig("Double click speed", "double_click_speed", BuildNumConfig(0, 0.5, 0.05), 0.3), -- original code
 
     AddConfig("Double click range", "double_click_range", BuildNumConfig(10, 60, 5), 25),
-    AddConfig("Turf grid toggle key", "turf_grid_key", keylist, "KEY_F3"),
+    AddConfig("Turf grid toggle key", "turf_grid_key", keys, "KEY_F3"),
     AddConfig("Turf grid radius", "turf_grid_radius", BuildNumConfig(1, 50, 1), 5),
     AddConfig("Turf grid color", "turf_grid_color", colorlist, "WHITE"),
     AddConfig("Always deploy on grid", "deploy_on_grid", boolean, false),
-    AddConfig("Auto-collect toggle key", "auto_collect_key", keylist, "KEY_F4"),
+    AddConfig("Auto-collect toggle key", "auto_collect_key", keys, "KEY_F4"),
     AddConfig("Enable auto-collect by default", "auto_collect", boolean, false),
-    AddConfig("Endless deploy toggle key", "endless_deploy_key", keylist, "KEY_F5"),
+    AddConfig("Endless deploy toggle key", "endless_deploy_key", keys, "KEY_F5"),
     AddConfig("Enable endless deploy by default", "endless_deploy", boolean, true),
-    AddConfig("Craft last recipe key", "last_recipe_key", keylist, "KEY_C"),
+    AddConfig("Craft last recipe key", "last_recipe_key", keys, "KEY_C"),
     AddConfig("Tooth-trap spacing", "tooth_trap_spacing", BuildNumConfig(1, 4, 0.5), 2),
 
     AddConfig("Farm tilling grid", "farm_grid", gridlist, "3x3", "TILL farm plots in 2x2, 3x3, or 4x4 grids"),
