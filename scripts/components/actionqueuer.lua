@@ -64,55 +64,7 @@ local offsets_4x4 = {
 -- 210705 null: added support for other mods to add their own CherryPick conditions
 local mod_cherrypick_fns = {} -- This will be a list of funtions from other mods
 
-function table_print(tt, indent, done)
-    done = done or {}
-    indent = indent or 0
-    if type(tt) == "table" then
-        local sb = {}
-        for key, value in pairs(tt) do
-            table.insert(sb, string.rep(" ", indent)) -- indent it
-            -- if type (value) == "table" and not done [value] then
-            -- done [value] = true
-            -- if type(key) == "table" then
-            -- table.insert(sb, tostring(key) .. " = {\n")
-            -- else
-            -- table.insert(sb, key .. " = {\n")
-            -- end
-            -- table.insert(sb, table_print (value, indent + 2, done))
-            -- table.insert(sb, string.rep (" ", indent)) -- indent it
-            -- table.insert(sb, "}\n");
-            if "number" == type(key) then
-                table.insert(sb, string.format('%d: "%s" (%s)\n', key, tostring(value), type(value)))
-            else
-                table.insert(sb, string.format('%s = "%s" (%s)\n', tostring(key), tostring(value), type(value)))
-            end
-        end
-        return table.concat(sb)
-    else
-        return tt .. "(type: " .. type(tt) .. ")\n"
-    end
-end
-
-function to_string(tbl)
-    if "nil" == type(tbl) then
-        return tostring(nil)
-    elseif "table" == type(tbl) then
-        return "\n" .. table_print(tbl) .. "\n"
-    elseif "string" == type(tbl) then
-        return tbl
-    else
-        return tostring(tbl) .. "(" .. type(tbl) .. ")"
-    end
-end
-local DebugPrint = TUNING.ACTION_QUEUE_DEBUG_MODE and function(...)
-        local msg = "[ActionQueue]"
-        for i = 1, arg.n do
-            msg = msg .. " " .. to_string(arg[i])
-        end
-        print(msg .. "\n")
-    end or function()
-        --[[disabled]]
-    end
+local DebugPrint = _G.DebugPrint
 
 local function AddAction(category, action, testfn)
     DebugPrint("-------------------------------------")
@@ -688,6 +640,7 @@ AddAction(
     end
 )
 
+-- 250327 VanCa: Add highlight opacity
 local ActionQueuer =
     Class(
     function(self, inst)
@@ -712,6 +665,7 @@ local ActionQueuer =
         self.action_delay = FRAMES * 3
         self.work_delay = FRAMES * 6
         self.color = {x = 1, y = 1, z = 1}
+        self.highlight_opacity = 0.5
         self.deploy_on_grid = false
         self.auto_collect = false
         self.endless_deploy = false
@@ -1039,7 +993,13 @@ function ActionQueuer:SendActionAndWait(act, rightclick, target)
                 -- blue
                 --highlight:SetAddColour({x = 20/255 * 0.5, y = 174/255 * 0.5, z = 213/255 * 0.5})
                 -- pink
-                highlight:SetAddColour({x = 255 / 255 * 0.5, y = 192 / 255 * 0.5, z = 203 / 255 * 0.5})
+                highlight:SetAddColour(
+                    {
+                        x = 255 / 255 * self.highlight_opacity,
+                        y = 192 / 255 * self.highlight_opacity,
+                        z = 203 / 255 * self.highlight_opacity
+                    }
+                )
             end
         end
 
@@ -1117,13 +1077,19 @@ function ActionQueuer:SendActionAndWait(act, rightclick, target)
     end
 end
 
+function ActionQueuer:SetHighlightOpacity(opacity)
+    DebugPrint("-------------------------------------")
+    DebugPrint("SetHighlightOpacity: opacity:", opacity)
+    self.highlight_opacity = opacity
+end
+
 function ActionQueuer:SetSelectionColor(r, g, b, a)
     DebugPrint("-------------------------------------")
     DebugPrint("SetSelectionColor: r:", r, "g:", g, "b:", b, "a:", a)
     self.selection_widget:SetTint(r, g, b, a)
-    self.color.x = r * 0.5
-    self.color.y = g * 0.5
-    self.color.z = b * 0.5
+    self.color.x = r * self.highlight_opacity
+    self.color.y = g * self.highlight_opacity
+    self.color.z = b * self.highlight_opacity
 end
 
 function ActionQueuer:SelectionBox(rightclick)
@@ -3233,28 +3199,28 @@ end
 ActionQueuer.OnRemoveEntity = ActionQueuer.ClearAllThreads
 ActionQueuer.OnRemoveFromEntity = ActionQueuer.ClearAllThreads
 
-local function GetSpeed(locomotor)
-    local pc = ThePlayer.components.playercontroller
-    if pc.locomotor then
-        DebugPrint("groundspeedmultiplier:", locomotor.groundspeedmultiplier)
-        DebugPrint("externalspeedmultiplier:", locomotor.externalspeedmultiplier)
-    end
-    local speed = locomotor:GetRunSpeed()
-    return speed or speed / (locomotor:TempGroundSpeedMultiplier() or locomotor.groundspeedmultiplier or 1)
-end
--- Get the movement speed, but not calculate the plus bonus
-function ActionQueuer:GetSpeed()
-    local pc = ThePlayer.components.playercontroller
-    if not pc then
-        return
-    end
-    if pc.locomotor then
-        return GetSpeed(pc.locomotor)
-    else
-        local speed = GetSpeed(ThePlayer:AddComponent("locomotor"))
-        ThePlayer:RemoveComponent("locomotor")
-        return speed
-    end
-end
+-- local function GetSpeed(locomotor)
+    -- local pc = ThePlayer.components.playercontroller
+    -- if pc.locomotor then
+        -- DebugPrint("groundspeedmultiplier:", locomotor.groundspeedmultiplier)
+        -- DebugPrint("externalspeedmultiplier:", locomotor.externalspeedmultiplier)
+    -- end
+    -- local speed = locomotor:GetRunSpeed()
+    -- return speed or speed / (locomotor:TempGroundSpeedMultiplier() or locomotor.groundspeedmultiplier or 1)
+-- end
+-- -- Get the movement speed, but not calculate the plus bonus
+-- function ActionQueuer:GetSpeed()
+    -- local pc = ThePlayer.components.playercontroller
+    -- if not pc then
+        -- return
+    -- end
+    -- if pc.locomotor then
+        -- return GetSpeed(pc.locomotor)
+    -- else
+        -- local speed = GetSpeed(ThePlayer:AddComponent("locomotor"))
+        -- ThePlayer:RemoveComponent("locomotor")
+        -- return speed
+    -- end
+-- end
 
 return ActionQueuer

@@ -1,6 +1,78 @@
+-- 250324 VanCa: Integrate KeyBind UI by —›á©Šï
+-- https://github.com/liolok/DST-KeyBind-UI
+modimport("keybind")
+
 local _G = GLOBAL
-if _G.TheNet:IsDedicated() or _G.TheNet:GetServerGameMode() == "lavaarena" then return end
+if _G.TheNet:IsDedicated() or _G.TheNet:GetServerGameMode() == "lavaarena" then
+    return
+end
 TUNING.ACTION_QUEUE_DEBUG_MODE = GetModConfigData("debug_mode")
+
+function table_print(tt, indent, done)
+    done = done or {}
+    indent = indent or 0
+    local spacer = string.rep("  ", indent)
+
+    if type(tt) == "table" then
+        if done[tt] then
+            return "table (circular reference)"
+        end
+        done[tt] = true
+
+        local sb = {"{\n"}
+        for key, value in pairs(tt) do
+            table.insert(sb, spacer .. "  ")
+            if type(key) == "number" then
+                table.insert(sb, string.format("[%d] = ", key))
+            else
+                table.insert(sb, string.format("%s = ", tostring(key)))
+            end
+
+            -- Expand 1 level deep, show type for deeper tables
+            if type(value) == "table" then
+                if indent < 1 then -- Only expand up to 1 level deep
+                    table.insert(sb, table_print(value, indent + 1, done))
+                else
+                    table.insert(sb, tostring(value) .. " (table)")
+                end
+            else
+                table.insert(sb, tostring(value) .. " (" .. type(value) .. ")")
+            end
+            table.insert(sb, ",\n")
+        end
+        table.insert(sb, spacer .. "}")
+        done[tt] = nil -- Allow reuse of this table in other branches
+        return table.concat(sb)
+    else
+        return tostring(tt) .. " (" .. type(tt) .. ")"
+    end
+end
+
+function to_string(tbl)
+    if tbl == nil then
+        return "nil"
+    end
+    if type(tbl) == "table" then
+        return table_print(tbl, 0, {})
+    elseif "string" == type(tbl) then
+        return tbl
+    end
+    return tostring(tbl) .. " (" .. type(tbl) .. ")"
+end
+
+local DebugPrint = TUNING.ACTION_QUEUE_DEBUG_MODE and function(...)
+        local args = {...}
+        local msg = "[ActionQueue]"
+        for i = 1, #args do
+            msg = msg .. " " .. to_string(args[i])
+        end
+        if #args > 1 then
+            msg = msg .. "\n"
+        end
+        print(msg)
+    end or function()
+    end
+_G.DebugPrint = DebugPrint
 
 -- 250307 VanCa: Added options in the mod settings to allow users to choose what the limits should be.
 TUNING.STOP_WATERING_AT = GetModConfigData("stopWateringAt")
@@ -22,16 +94,8 @@ PLAYERCOLOURS.WHITE = {1, 1, 1, 1}
 
 Assets = {
     Asset("ATLAS", "images/selection_square.xml"),
-    Asset("IMAGE", "images/selection_square.tex"),
+    Asset("IMAGE", "images/selection_square.tex")
 }
-
-local DebugPrint = TUNING.ACTION_QUEUE_DEBUG_MODE and function(...)
-    local msg = "[ActionQueue]"
-    for i = 1, arg.n do
-        msg = msg.." "..tostring(arg[i])
-    end
-    print(msg)
-end or function() --[[disabled]] end
 
 local interrupt_controls = {}
 for control = _G.CONTROL_ATTACK, _G.CONTROL_MOVE_RIGHT do
@@ -41,7 +105,7 @@ end
 -- 220225 null: support for littledro's QAAQ mod
 local qaaq = GetModConfigData("qaaq")
 if qaaq then
-	interrupt_controls[_G.CONTROL_ACTION] = false
+    interrupt_controls[_G.CONTROL_ACTION] = false
 end
 
 local mouse_controls = {[_G.CONTROL_PRIMARY] = false, [_G.CONTROL_SECONDARY] = true}
@@ -54,6 +118,8 @@ local function GetKeyFromConfig(config)
     return type(key) == "number" and key or -1
 end
 
+local callback = {} -- config name to function called when the key event triggered
+
 local function InGame()
     return ThePlayer and ThePlayer.HUD and not ThePlayer.HUD:HasInputFocus()
 end
@@ -63,8 +129,10 @@ local turf_size = 4
 local turf_grid_visible = false
 local turf_grid_radius = GetModConfigData("turf_grid_radius")
 local turf_grid_color = PLAYERCOLOURS[GetModConfigData("turf_grid_color")]
-TheInput:AddKeyUpHandler(GetKeyFromConfig("turf_grid_key"), function()
-    if not InGame() then return end
+callback.turf_grid_key = function()
+    if not InGame() then
+        return
+    end
     if turf_grid_visible then
         for _, grid in pairs(turf_grid) do
             grid:Hide()
@@ -87,13 +155,15 @@ TheInput:AddKeyUpHandler(GetKeyFromConfig("turf_grid_key"), function()
         end
     end
     turf_grid_visible = true
-end)
+end
 
 -- 220225 null: support for littledro's QAAQ mod
-local collect_mod = {turn_on = "normal", turn_off = false, chop_mod = "chop_mod"} 
+local collect_mod = {turn_on = "normal", turn_off = false, chop_mod = "chop_mod"}
 
-TheInput:AddKeyUpHandler(GetKeyFromConfig("auto_collect_key"), function()
-    if not InGame() then return end
+callback.auto_collect_key = function()
+    if not InGame() then
+        return
+    end
 
     if qaaq then -- 220225 null: support for littledro's QAAQ mod
         ActionQueuer.auto_collect = collect_mod.turn_on
@@ -103,18 +173,22 @@ TheInput:AddKeyUpHandler(GetKeyFromConfig("auto_collect_key"), function()
     else
         ActionQueuer.auto_collect = not ActionQueuer.auto_collect -- 220225 null: original autocollect toggle
     end
-    ThePlayer.components.talker:Say("Auto Collect: "..tostring(ActionQueuer.auto_collect))
-end)
+    ThePlayer.components.talker:Say("Auto Collect: " .. tostring(ActionQueuer.auto_collect))
+end
 
-TheInput:AddKeyUpHandler(GetKeyFromConfig("endless_deploy_key"), function()
-    if not InGame() then return end
+callback.endless_deploy_key = function()
+    if not InGame() then
+        return
+    end
     ActionQueuer.endless_deploy = not ActionQueuer.endless_deploy
-    ThePlayer.components.talker:Say("Endless deploy: "..tostring(ActionQueuer.endless_deploy))
-end)
+    ThePlayer.components.talker:Say("Endless deploy: " .. tostring(ActionQueuer.endless_deploy))
+end
 
 local last_recipe, last_skin
-TheInput:AddKeyUpHandler(GetKeyFromConfig("last_recipe_key"), function()
-    if not InGame() then return end
+callback.last_recipe_key = function()
+    if not InGame() then
+        return
+    end
     if not last_recipe then
         ThePlayer.components.talker:Say("No previous recipe found")
         return
@@ -122,7 +196,7 @@ TheInput:AddKeyUpHandler(GetKeyFromConfig("last_recipe_key"), function()
     local last_recipe_name = STRINGS.NAMES[last_recipe.name:upper()] or "UNKNOWN"
     local builder = ThePlayer.replica.builder
     if not builder:CanBuild(last_recipe.name) and not builder:IsBuildBuffered(last_recipe.name) then
-        ThePlayer.components.talker:Say("Unable to craft: "..last_recipe_name)
+        ThePlayer.components.talker:Say("Unable to craft: " .. last_recipe_name)
         return
     end
     if last_recipe.placer then
@@ -133,8 +207,8 @@ TheInput:AddKeyUpHandler(GetKeyFromConfig("last_recipe_key"), function()
     else
         builder:MakeRecipeFromMenu(last_recipe, last_skin)
     end
-    ThePlayer.components.talker:Say("Crafting last recipe: "..last_recipe_name)
-end)
+    ThePlayer.components.talker:Say("Crafting last recipe: " .. last_recipe_name)
+end
 
 local function ActionQueuerInit()
     print("[ActionQueue] Adding ActionQueuer component")
@@ -149,101 +223,189 @@ local function ActionQueuerInit()
     ActionQueuer:SetFarmGrid(GetModConfigData("farm_grid")) -- 201221 null: added support for changing farm grids (3x3, 4x4)
     ActionQueuer:SetDoubleSnake(GetModConfigData("double_snake")) -- 210127 null: added support for snaking within snaking
     local r, g, b = unpack(PLAYERCOLOURS[GetModConfigData("selection_color")])
+    -- 250327 VanCa: Add highlight opacity
+    ActionQueuer:SetHighlightOpacity(GetModConfigData("highlight_opacity"))
     ActionQueuer:SetSelectionColor(r, g, b, GetModConfigData("selection_opacity"))
 end
 
-local action_queue_key = GetKeyFromConfig("action_queue_key")
+-- 250327 VanCa: TheInput.IsKeyDown(...) crash when action_queue_key is nil, so I set it to 999 instead, for safety
+local action_queue_key
+
 --maybe i won't need this one day...
-local use_control = TheInput:GetLocalizedControl(0, CONTROL_FORCE_TRADE) == STRINGS.UI.CONTROLSSCREEN.INPUTS[1][action_queue_key]
-action_queue_key = use_control and CONTROL_FORCE_TRADE or action_queue_key
-TheInput.IsAqModifierDown = use_control and TheInput.IsControlPressed or TheInput.IsKeyDown
+local use_control
+
 local always_clear_queue = GetModConfigData("always_clear_queue")
-AddComponentPostInit("playercontroller", function(self, inst)
-    if inst ~= _G.ThePlayer then return end
-    ThePlayer = _G.ThePlayer
-    TheWorld = _G.TheWorld
-    ActionQueuerInit()
+AddComponentPostInit(
+    "playercontroller",
+    function(self, inst)
+        if inst ~= _G.ThePlayer then
+            return
+        end
+        ThePlayer = _G.ThePlayer
+        TheWorld = _G.TheWorld
+        ActionQueuerInit()
 
-    local PlayerControllerOnControl = self.OnControl	
-	DebugPrint("PlayerControllerOnControl")
-    self.OnControl = function(self, control, down)
-        local mouse_control = mouse_controls[control]
-        if mouse_control ~= nil then
-			DebugPrint("PlayerControllerOnControl: down:", down)
-            if down then
-                if TheInput:IsAqModifierDown(action_queue_key) then
-					DebugPrint("action_queue_key pressed")
-                    local target = TheInput:GetWorldEntityUnderMouse()
-                    if target and target:HasTag("fishable") and not inst.replica.rider:IsRiding()
-                      and inst.replica.inventory:EquipHasTag("fishingrod") then
-                        ActionQueuer:StartAutoFisher(target)
-                    elseif not ActionQueuer.auto_fishing then
-                        ActionQueuer:OnDown(mouse_control)
+        local PlayerControllerOnControl = self.OnControl
+        DebugPrint("PlayerControllerOnControl")
+        self.OnControl = function(self, control, down)
+            local mouse_control = mouse_controls[control]
+            if mouse_control ~= nil then
+                if down then
+                    if TheInput:IsAqModifierDown(action_queue_key) then
+                        local target = TheInput:GetWorldEntityUnderMouse()
+                        if
+                            target and target:HasTag("fishable") and not inst.replica.rider:IsRiding() and
+                                inst.replica.inventory:EquipHasTag("fishingrod")
+                         then
+                            ActionQueuer:StartAutoFisher(target)
+                        elseif not ActionQueuer.auto_fishing then
+                            ActionQueuer:OnDown(mouse_control)
+                        end
+                        return
                     end
-                    return
+                else
+                    ActionQueuer:OnUp(mouse_control)
                 end
+            end
+            PlayerControllerOnControl(self, control, down)
+            if
+                down and ActionQueuer.action_thread and not ActionQueuer.selection_thread and InGame() and
+                    (interrupt_controls[control] or mouse_control ~= nil and not TheInput:GetHUDEntityUnderMouse())
+             then
+                ActionQueuer:ClearActionThread()
+                if always_clear_queue or control == CONTROL_ACTION then
+                    ActionQueuer:ClearSelectedEntities()
+                end
+            end
+        end
+        local PlayerControllerIsControlPressed = self.IsControlPressed
+        self.IsControlPressed = function(self, control)
+            if control == CONTROL_FORCE_INSPECT and ActionQueuer.action_thread then
+                return false
+            end
+
+            -- 201220 null: fix for EAT on self
+            if
+                use_control and control == CONTROL_FORCE_TRADE and
+                    ThePlayer.components.playeravatardata.inst.replica.inventory:GetActiveItem() ~= nil
+             then
+                return false
+            end
+
+            return PlayerControllerIsControlPressed(self, control)
+        end
+    end
+)
+
+AddClassPostConstruct(
+    "components/builder_replica",
+    function(self)
+        local BuilderReplicaMakeRecipeFromMenu = self.MakeRecipeFromMenu
+        self.MakeRecipeFromMenu = function(self, recipe, skin)
+            last_recipe, last_skin = recipe, skin
+            if
+                not ActionQueuer.action_thread and TheInput:IsAqModifierDown(action_queue_key) and not recipe.placer and
+                    self:CanBuild(recipe.name)
+             then
+                ActionQueuer:RepeatRecipe(self, recipe, skin)
             else
-                ActionQueuer:OnUp(mouse_control)
+                BuilderReplicaMakeRecipeFromMenu(self, recipe, skin)
             end
         end
-        PlayerControllerOnControl(self, control, down)
-        if down and ActionQueuer.action_thread and not ActionQueuer.selection_thread and InGame()
-          and (interrupt_controls[control] or mouse_control ~= nil and not TheInput:GetHUDEntityUnderMouse()) then
-            ActionQueuer:ClearActionThread()
-            if always_clear_queue or control == CONTROL_ACTION then
-                ActionQueuer:ClearSelectedEntities()
+        local BuilderReplicaMakeRecipeAtPoint = self.MakeRecipeAtPoint
+        self.MakeRecipeAtPoint = function(self, recipe, pt, rot, skin)
+            last_recipe, last_skin = recipe, skin
+            BuilderReplicaMakeRecipeAtPoint(self, recipe, pt, rot, skin)
+        end
+    end
+)
+
+AddComponentPostInit(
+    "highlight",
+    function(self, inst)
+        local HighlightHighlight = self.Highlight
+        self.Highlight = function(self, ...)
+            if ActionQueuer.selection_thread or ActionQueuer:IsSelectedEntity(inst) then
+                return
             end
+            HighlightHighlight(self, ...)
+        end
+        local HighlightUnHighlight = self.UnHighlight
+        self.UnHighlight = function(self)
+            if ActionQueuer:IsSelectedEntity(inst) then
+                return
+            end
+            HighlightUnHighlight(self)
         end
     end
-    local PlayerControllerIsControlPressed = self.IsControlPressed
-    self.IsControlPressed = function(self, control)
-        if control == CONTROL_FORCE_INSPECT and ActionQueuer.action_thread then return false end
-        
-        -- 201220 null: fix for EAT on self
-        if use_control and control == CONTROL_FORCE_TRADE and
-           ThePlayer.components.playeravatardata.inst.replica.inventory:GetActiveItem() ~= nil then return false end
-        
-        return PlayerControllerIsControlPressed(self, control)
-    end
-end)
+)
 
-AddClassPostConstruct("components/builder_replica", function(self)
-    local BuilderReplicaMakeRecipeFromMenu = self.MakeRecipeFromMenu
-    self.MakeRecipeFromMenu = function(self, recipe, skin)
-        last_recipe, last_skin = recipe, skin
-        if not ActionQueuer.action_thread and TheInput:IsAqModifierDown(action_queue_key)
-          and not recipe.placer and self:CanBuild(recipe.name) then
-            ActionQueuer:RepeatRecipe(self, recipe, skin)
-        else
-            BuilderReplicaMakeRecipeFromMenu(self, recipe, skin)
-        end
-    end
-    local BuilderReplicaMakeRecipeAtPoint = self.MakeRecipeAtPoint
-    self.MakeRecipeAtPoint = function(self, recipe, pt, rot, skin)
-        last_recipe, last_skin = recipe, skin
-        BuilderReplicaMakeRecipeAtPoint(self, recipe, pt, rot, skin)
-    end
-end)
-
-AddComponentPostInit("highlight", function(self, inst)
-    local HighlightHighlight = self.Highlight
-    self.Highlight = function(self, ...)
-        if ActionQueuer.selection_thread or ActionQueuer:IsSelectedEntity(inst) then return end
-        HighlightHighlight(self, ...)
-    end
-    local HighlightUnHighlight = self.UnHighlight
-    self.UnHighlight = function(self)
-        if ActionQueuer:IsSelectedEntity(inst) then return end
-        HighlightUnHighlight(self)
-    end
-end)
 --for minimizing the memory leak in geo
 --hides the geo grid during an action queue
-AddComponentPostInit("placer", function(self, inst)
-    local PlacerOnUpdate = self.OnUpdate
-    self.OnUpdate = function(self, ...)
-        self.disabled = ActionQueuer.action_thread ~= nil
-        PlacerOnUpdate(self, ...)
+AddComponentPostInit(
+    "placer",
+    function(self, inst)
+        local PlacerOnUpdate = self.OnUpdate
+        self.OnUpdate = function(self, ...)
+            self.disabled = ActionQueuer.action_thread ~= nil
+            PlacerOnUpdate(self, ...)
+        end
     end
-end)
+)
 
+local is_holding_action_queue_mouse_key = false
+function IsMouseKeyDown(key)
+    return is_holding_action_queue_mouse_key
+end
+
+local handler = {} -- config name to key event handlers
+function KeyBind(name, key)
+    if handler[name] then
+        handler[name]:Remove()
+    end -- disable old binding
+
+    -- Special Unbind handling for action_queue_key
+    if name == "action_queue_key" then
+        TheInput.IsAqModifierDown = function()
+            return false
+        end
+    end
+
+    if key ~= nil then -- new binding
+        if key >= 1000 then -- it's a mouse button
+            if name == "action_queue_key" then
+                handler[name] =
+                    GLOBAL.TheInput:AddMouseButtonHandler(
+                    function(button, down, x, y)
+                        if button == key then
+                            is_holding_action_queue_mouse_key = down
+                        end
+                    end
+                )
+                use_control = false
+                action_queue_key = key
+                TheInput.IsAqModifierDown = IsMouseKeyDown
+            else
+                handler[name] =
+                    GLOBAL.TheInput:AddMouseButtonHandler(
+                    function(button, down, x, y)
+                        if button == key and down then
+                            callback[name]()
+                        end
+                    end
+                )
+            end
+        else -- it's a keyboard key
+            if name == "action_queue_key" then
+                use_control =
+                    TheInput:GetLocalizedControl(0, CONTROL_FORCE_TRADE) == STRINGS.UI.CONTROLSSCREEN.INPUTS[1][key]
+                action_queue_key = use_control and CONTROL_FORCE_TRADE or key
+                TheInput.IsAqModifierDown = use_control and TheInput.IsControlPressed or TheInput.IsKeyDown
+            else
+                handler[name] = GLOBAL.TheInput:AddKeyDownHandler(key, callback[name])
+            end
+        end
+    else -- no binding
+        handler[name] = nil
+    end
+end
