@@ -64,7 +64,7 @@ local offsets_4x4 = {
 -- 210705 null: added support for other mods to add their own CherryPick conditions
 local mod_cherrypick_fns = {} -- This will be a list of funtions from other mods
 
-local DebugPrint = _G.DebugPrint
+local DebugPrint = _G.ActionQueue.DebugPrint
 
 local function AddAction(category, action, testfn)
     DebugPrint("-------------------------------------")
@@ -440,27 +440,16 @@ AddActionList(
 )
 
 -- 201218 null: added support for right click PICK while equipping plantregistryhat
+-- 210103 null: added support for right click PICK while Wormwood (plantkin)
+-- 250401 VanCa: Fix a bug where Wormwood can't PICK farm plants with rightclick
 AddAction(
     "rightclick",
     "PICK",
     function(target)
         local equip_item = ThePlayer.components.playeravatardata.inst.replica.inventory:GetEquippedItem(EQUIPSLOTS.HEAD)
-        return equip_item and (equip_item.prefab == "plantregistryhat" or equip_item.prefab == "nutrientsgoggleshat")
-    end
-)
--- 210103 null: added support for right click PICK while Wormwood (plantkin)
-AddAction(
-    "rightclick",
-    "PICK",
-    function(target)
-        return ThePlayer:HasTag("plantkin")
-    end
-)
-AddAction(
-    "rightclick",
-    "PICK",
-    function(target)
-        return target.prefab == "otterden"
+        return (equip_item and (equip_item.prefab == "plantregistryhat" or equip_item.prefab == "nutrientsgoggleshat")) or
+            (ThePlayer:HasTag("plantkin") and target:HasTag("farm_plant")) or
+            target.prefab == "otterden"
     end
 )
 
@@ -1327,7 +1316,7 @@ function ActionQueuer:DoubleClick(rightclick, target)
                 self:SelectEntity(ent, rightclick)
             end
         end
-    elseif target:HasTags({"tree", "DIG_workable"}) then
+    elseif target:HasTags({"tree", "DIG_workable"}) and target.action == ACTIONS.DIG then
         -- 241028 VanCa: Do not distinguish between tree stumps when digging up roots
         for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
             if ent:HasTags({"tree", "DIG_workable"}) then
@@ -1364,10 +1353,13 @@ function ActionQueuer:DoubleClick(rightclick, target)
         end
     elseif
         target.prefab == "marbleshrub" and target.action == ACTIONS.MINE and
-            target.AnimState:IsCurrentAnimation("idle_tall")
+            (target.AnimState:IsCurrentAnimation("idle_tall") or target.AnimState:IsCurrentAnimation("hit_tall"))
      then -- Only check for lvl3/tall marble trees
         for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if ent.prefab == target.prefab and ent.AnimState:IsCurrentAnimation("idle_tall") then
+            if
+                ent.prefab == target.prefab and
+                    (ent.AnimState:IsCurrentAnimation("idle_tall") or ent.AnimState:IsCurrentAnimation("hit_tall"))
+             then
                 self:SelectEntity(ent, false)
             end
         end
@@ -1403,10 +1395,46 @@ function ActionQueuer:DoubleClick(rightclick, target)
                 end
             end
         end
-    elseif target:HasTag("farm_plant_killjoy") and target.action == ACTIONS.DIG then
+    elseif (target.action == ACTIONS.DIG or target.action == ACTIONS.PICK) and target:HasTag("farm_plant_killjoy") then
         -- 250321 VanCa: Won't select normal plants when digging up rotten farm plants
         for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
             if ent.prefab == target.prefab and ent:HasTag("farm_plant_killjoy") then
+                local act, rightclick_ = self:GetAction(ent, rightclick)
+                if act and act.action == target.action then
+                    self:SelectEntity(ent, rightclick_)
+                end
+            end
+        end
+    elseif
+        (target.action == ACTIONS.DIG or target.action == ACTIONS.PICK) and target:HasTags("farm_plant") and
+            (target.AnimState:IsCurrentAnimation("crop_full") or target.AnimState:IsCurrentAnimation("crop_oversized"))
+     then
+        -- 250404 VanCa: Won't select unripe or rotten plants when digging/haverting farm plants
+        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
+            if
+                ent.prefab == target.prefab and
+                    (ent.AnimState:IsCurrentAnimation("crop_full") or ent.AnimState:IsCurrentAnimation("crop_oversized"))
+             then
+                local act, rightclick_ = self:GetAction(ent, rightclick)
+                if act and act.action == target.action then
+                    self:SelectEntity(ent, rightclick_)
+                end
+            end
+        end
+    elseif
+        target.action == ACTIONS.DIG and target:HasTags("farm_plant") and
+            (target.AnimState:IsCurrentAnimation("crop_seed") or target.AnimState:IsCurrentAnimation("crop_sprout") or
+                target.AnimState:IsCurrentAnimation("crop_small") or
+                target.AnimState:IsCurrentAnimation("crop_med"))
+     then
+        -- 250404 VanCa: Won't select grown plants when digging up growing farm plants
+        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
+            if
+                ent.prefab == target.prefab and
+                    (ent.AnimState:IsCurrentAnimation("crop_seed") or ent.AnimState:IsCurrentAnimation("crop_sprout") or
+                        ent.AnimState:IsCurrentAnimation("crop_small") or
+                        ent.AnimState:IsCurrentAnimation("crop_med"))
+             then
                 local act, rightclick_ = self:GetAction(ent, rightclick)
                 if act and act.action == target.action then
                     self:SelectEntity(ent, rightclick_)
@@ -2088,9 +2116,8 @@ function ActionQueuer:GetNewActiveItem(allowed_prefabs, tags_required, validate_
         DebugPrint("item_data:", item_data)
         local container = self:GetContainer(item_data.cont)
         repeat
-            self.inst.replica.inventory:ReturnActiveItem()
-            self:Wait()
             container:TakeActiveItemFromAllOfSlot(item_data.slot)
+            self:Wait()
         until self:GetActiveItem() == item_data.item
         DebugPrint("GetNewActiveItem - Done")
         return item_data.item
@@ -2365,7 +2392,7 @@ function ActionQueuer:FertilizeAtPoint(pos, item, fast, endless_deploy)
             local fertilizerNutrients = GetNutrientValue(activeItem.prefab)
             -- If input endless_deploy is nil then use self.endless_deploy
             endless_deploy = endless_deploy or self.endless_deploy
-            if endless_deploy then
+            if endless_deploy and fertilizerNutrients then
                 -- 250307 VanCa: Added options in the mod settings to allow users to choose what the limits should be.
                 while (fertilizerNutrients[1] > 0 and tileNutrients[1] < TUNING.STOP_FERTILIZING_AT) or
                     (fertilizerNutrients[2] > 0 and tileNutrients[2] < TUNING.STOP_FERTILIZING_AT) or
@@ -2395,10 +2422,14 @@ function ActionQueuer:FertilizeAtPoint(pos, item, fast, endless_deploy)
                 -- endless_deploy Off
                 -- Default behavor, fertilize the tile once.
                 if
-                    (fertilizerNutrients[1] > 0 and tileNutrients[1] < 4) or
-                        (fertilizerNutrients[2] > 0 and tileNutrients[2] < 4) or
-                        (fertilizerNutrients[3] > 0 and tileNutrients[3] < 4)
+                    fertilizerNutrients and
+                        ((fertilizerNutrients[1] > 0 and tileNutrients[1] < 4) or
+                            (fertilizerNutrients[2] > 0 and tileNutrients[2] < 4) or
+                            (fertilizerNutrients[3] > 0 and tileNutrients[3] < 4)) or
+                        not fertilizerNutrients
                  then
+                    -- 250404 VanCa: If we can get fertilizer information, skip tiles that doesn't need it
+                    -- If we can't, fertilize each tile once
                     self:SendActionAndWait(act, true)
 
                     -- 201225 null: extra delay needed when Fertilizing through SelectionBox()
@@ -2838,9 +2869,12 @@ function ActionQueuer:ApplyToSelection()
                     local auto_collect = CheckAllowedActions("autocollect", act.action, target, self)
                     DebugPrint("auto_collect:", auto_collect)
 
-                    -- 250320 VanCa: Server won't excute these two actions when Wormwood's holding a shovel
+                    -- 250320 VanCa: Server won't excute these two actions on farm plants while Wormwood's holding a shovel
                     -- He can only check ASSESSPLANTHAPPINESS while holding a shovel, so this part auto unequip it
-                    if (act.action.id == "INTERACT_WITH" or act.action.id == "PICK") and act.doer.prefab == "wormwood" then
+                    if
+                        target:HasTag("farm_plant") and (act.action.id == "INTERACT_WITH" or act.action.id == "PICK") and
+                            act.doer.prefab == "wormwood"
+                     then
                         local equiped_item_in_hand = self:GetEquippedItemInHand()
                         if equiped_item_in_hand and equiped_item_in_hand:HasTag("DIG_tool") then
                             self:UnEquip(equiped_item_in_hand, false)
