@@ -1,12 +1,14 @@
--- 250324 VanCa: Integrate KeyBind UI by ��ᩊ�
+-- 250324 VanCa: Integrate KeyBind UI by 李皓奇
 -- https://github.com/liolok/DST-KeyBind-UI
 modimport("keybind")
+-- 250402 VanCa: Add Chinese and Japanese support
 
 local _G = GLOBAL
 if _G.TheNet:IsDedicated() or _G.TheNet:GetServerGameMode() == "lavaarena" then
     return
 end
-TUNING.ACTION_QUEUE_DEBUG_MODE = GetModConfigData("debug_mode")
+
+TUNING.ACTION_QUEUE_DEBUG_MODE = GetModConfigData("enable_debug_mode")
 
 function table_print(tt, indent, done)
     done = done or {}
@@ -61,22 +63,59 @@ function to_string(tbl)
 end
 
 local DebugPrint = TUNING.ACTION_QUEUE_DEBUG_MODE and function(...)
-        local args = {...}
         local msg = "[ActionQueue]"
-        for i = 1, #args do
-            msg = msg .. " " .. to_string(args[i])
+        for i = 1, arg.n do
+            msg = msg .. " " .. to_string(arg[i])
         end
-        if #args > 1 then
+        if arg.n > 1 then
             msg = msg .. "\n"
         end
         print(msg)
     end or function()
     end
-_G.DebugPrint = DebugPrint
+_G.ActionQueue = {}
+_G.ActionQueue.DebugPrint = DebugPrint
+
+TUNING.ACTION_QUEUE_LANGUAGE = GetModConfigData("language")
+local lang =
+    TUNING.ACTION_QUEUE_LANGUAGE == "auto" and _G.LOC.GetLocale() and _G.LOC.GetLocale().code or
+    TUNING.ACTION_QUEUE_LANGUAGE
+
+local LANG_MESSAGES = {
+    zh = {
+        AUTO_COLLECT = "自动收集: ",
+        ENDLESS_DEPLOY = "无尽部署: ",
+        NO_PREVIOUS_RECIPE = "未找到之前的配方",
+        UNABLE_TO_CRAFT = "无法制作: ",
+        CRAFTING_LAST_RECIPE = "正在制作上一个配方: "
+    },
+    zht = {
+        AUTO_COLLECT = "自動收集: ",
+        ENDLESS_DEPLOY = "無盡部署: ",
+        NO_PREVIOUS_RECIPE = "未找到之前的配方",
+        UNABLE_TO_CRAFT = "無法製作: ",
+        CRAFTING_LAST_RECIPE = "正在製作上一個配方: "
+    },
+    en = {
+        AUTO_COLLECT = "Auto Collect: ",
+        ENDLESS_DEPLOY = "Endless deploy: ",
+        NO_PREVIOUS_RECIPE = "No previous recipe found",
+        UNABLE_TO_CRAFT = "Unable to craft: ",
+        CRAFTING_LAST_RECIPE = "Crafting last recipe: "
+    },
+    ja = {
+        AUTO_COLLECT = "自動収集: ",
+        ENDLESS_DEPLOY = "無限展開: ",
+        NO_PREVIOUS_RECIPE = "以前のレシピが見つかりません",
+        UNABLE_TO_CRAFT = "作成できません: ",
+        CRAFTING_LAST_RECIPE = "最後のレシピを作成中: "
+    }
+}
+local MESSAGES = LANG_MESSAGES[lang] or LANG_MESSAGES.en
 
 -- 250307 VanCa: Added options in the mod settings to allow users to choose what the limits should be.
-TUNING.STOP_WATERING_AT = GetModConfigData("stopWateringAt")
-TUNING.STOP_FERTILIZING_AT = GetModConfigData("stopFertilizingAt")
+TUNING.STOP_WATERING_AT = GetModConfigData("stop_watering_at")
+TUNING.STOP_FERTILIZING_AT = GetModConfigData("stop_fertilizing_at")
 
 local SpawnPrefab = _G.SpawnPrefab
 local TheInput = _G.TheInput
@@ -173,7 +212,7 @@ callback.auto_collect_key = function()
     else
         ActionQueuer.auto_collect = not ActionQueuer.auto_collect -- 220225 null: original autocollect toggle
     end
-    ThePlayer.components.talker:Say("Auto Collect: " .. tostring(ActionQueuer.auto_collect))
+    ThePlayer.components.talker:Say(MESSAGES.AUTO_COLLECT .. tostring(ActionQueuer.auto_collect))
 end
 
 callback.endless_deploy_key = function()
@@ -181,22 +220,22 @@ callback.endless_deploy_key = function()
         return
     end
     ActionQueuer.endless_deploy = not ActionQueuer.endless_deploy
-    ThePlayer.components.talker:Say("Endless deploy: " .. tostring(ActionQueuer.endless_deploy))
+    ThePlayer.components.talker:Say(MESSAGES.ENDLESS_DEPLOY .. tostring(ActionQueuer.endless_deploy))
 end
 
 local last_recipe, last_skin
-callback.last_recipe_key = function()
+callback.craft_last_recipe_key = function()
     if not InGame() then
         return
     end
     if not last_recipe then
-        ThePlayer.components.talker:Say("No previous recipe found")
+        ThePlayer.components.talker:Say(MESSAGES.NO_PREVIOUS_RECIPE)
         return
     end
     local last_recipe_name = STRINGS.NAMES[last_recipe.name:upper()] or "UNKNOWN"
     local builder = ThePlayer.replica.builder
     if not builder:CanBuild(last_recipe.name) and not builder:IsBuildBuffered(last_recipe.name) then
-        ThePlayer.components.talker:Say("Unable to craft: " .. last_recipe_name)
+        ThePlayer.components.talker:Say(MESSAGES.UNABLE_TO_CRAFT .. last_recipe_name)
         return
     end
     if last_recipe.placer then
@@ -207,7 +246,7 @@ callback.last_recipe_key = function()
     else
         builder:MakeRecipeFromMenu(last_recipe, last_skin)
     end
-    ThePlayer.components.talker:Say("Crafting last recipe: " .. last_recipe_name)
+    ThePlayer.components.talker:Say(MESSAGES.CRAFTING_LAST_RECIPE .. last_recipe_name)
 end
 
 local function ActionQueuerInit()
@@ -217,8 +256,8 @@ local function ActionQueuerInit()
     ActionQueuer.double_click_speed = GetModConfigData("double_click_speed")
     ActionQueuer.double_click_range = GetModConfigData("double_click_range")
     ActionQueuer.deploy_on_grid = GetModConfigData("deploy_on_grid")
-    ActionQueuer.auto_collect = GetModConfigData("auto_collect")
-    ActionQueuer.endless_deploy = GetModConfigData("endless_deploy")
+    ActionQueuer.auto_collect = GetModConfigData("enable_auto_collect")
+    ActionQueuer.endless_deploy = GetModConfigData("enable_endless_deploy")
     ActionQueuer:SetToothTrapSpacing(GetModConfigData("tooth_trap_spacing"))
     ActionQueuer:SetFarmGrid(GetModConfigData("farm_grid")) -- 201221 null: added support for changing farm grids (3x3, 4x4)
     ActionQueuer:SetDoubleSnake(GetModConfigData("double_snake")) -- 210127 null: added support for snaking within snaking
