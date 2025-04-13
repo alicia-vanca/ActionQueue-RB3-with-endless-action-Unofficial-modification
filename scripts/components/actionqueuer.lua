@@ -168,7 +168,9 @@ AddActionList(
     "PICK",
     "BOTTLE",
     "WAX",
-    "GRAVEDIG" -- 250304 VanCa: Added support for Wendy's skill
+    "GRAVEDIG", -- 250304 VanCa: Added support for Wendy's skill
+    "FT_CUTFUNGI", -- 250410 VanCa: Added support for shaving Candle Tree in Fairy Tales mod
+    "MYTH_YJP_GIVE" -- 250412 VanCa: Added support for reviving giant plant with Myth mod's bottle
 )
 
 -- 250320 VanCa: Prevent endless loop between 2 Catapults
@@ -812,14 +814,326 @@ function ActionQueuer:SetToothTrapSpacing(num)
     deploy_spacing.trap = num
 end
 
-function ActionQueuer:Wait(action, target)
-    -- DebugPrint("Wait: action:", action, "target:", target)
-    local current_time = GetTime()
-    if action and CheckAllowedActions("noworkdelay", action, target, self) then
-        DebugPrint("Short wait")
+-- Get the items on the mouse
+function ActionQueuer:GetActiveItem(allowed_prefabs)
+    local item = self.inst.replica.inventory:GetActiveItem()
+    DebugPrint("-------------------------------------")
+    DebugPrint("GetActiveItem:", tostring(item))
+
+    -- If no prefab is specified, return GetActiveItem() result
+    if not allowed_prefabs then
+        return item
+    end
+
+    -- If prefab is table, then allowed_prefabs = prefab, if prefab is string allowed_prefabs = {allowed_prefabs}, if else, crash..
+    allowed_prefabs =
+        (type(allowed_prefabs) == "string" and {allowed_prefabs}) or
+        (type(allowed_prefabs) == "table" and allowed_prefabs)
+    -- Return nil if the current active item isn't what we expect
+    return table.contains(allowed_prefabs, item.prefab) and item
+end
+
+function ActionQueuer:GetEquippedItemInHand()
+    DebugPrint("-------------------------------------")
+    DebugPrint("GetEquippedItemInHand")
+    return self.inst.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS)
+end
+
+-- Get item durable, reference: 呼吸
+-- i: [0 ~ 100]%
+function ActionQueuer:GetItemPercent(inst)
+    local i = 100
+    local classified =
+        type(inst) == "table" and inst.replica and inst.replica.inventoryitem and inst.replica.inventoryitem.classified
+    if classified then
+        if inst:HasOneOfTags({"fresh", "show_spoilage"}) and classified.perish then
+            i = math.floor(classified.perish:value() / 0.62)
+        elseif classified.percentused then
+            i = classified.percentused:value()
+        end
+    end
+    return i
+end
+
+-- Get entity's container
+function ActionQueuer:GetContainer(ent)
+    -- DebugPrint("ent:", ent)
+    if ent and ent.replica then
+        return ent.replica.container or ent.replica.inventory
+    end
+end
+
+local order_all = {"container", "equip", "body", "backpack", "mouse"}
+-- Get the location of the item and its container. Actually, tags are legacy code [Items under the mouse will only be included if order == ‘mouse’]
+-- reference: 呼吸
+function ActionQueuer:GetSlotsFromAll(allowed_prefabs, tags_required, validate_func, order)
+    DebugPrint("-------------------------------------")
+    DebugPrint("GetSlotsFromAll: allowed_prefabs:", allowed_prefabs, "tags_required:", tags_required)
+    local result = {}
+    local invent = self.inst.replica.inventory
+
+    if order == "mouse" then
+        order = order_all
+    elseif type(order) == "string" and table.contains(order_all, order) then
+        order = {order}
+    elseif type(order) == "table" then
+        local temp_order = {}
+        for _, storage_name in pairs(order) do
+            if type(storage_name) == "string" and table.contains(order_all, storage_name) then
+                table.insert(temp_order, storage_name)
+            end
+        end
+        order = temp_order
+    else
+        order = {"container", "equip", "body", "backpack"}
+    end
+
+    -- Make sure tags_required and allowed_prefabs are table, or nil
+    tags_required =
+        (type(tags_required) == "string" and {tags_required}) or (type(tags_required) == "table" and tags_required) or
+        nil
+    allowed_prefabs =
+        (type(allowed_prefabs) == "string" and {allowed_prefabs}) or
+        (type(allowed_prefabs) == "table" and allowed_prefabs) or
+        nil
+
+    local backpack_list, container_list = {}, {}
+    DebugPrint("invent:GetOpenContainers():", invent:GetOpenContainers())
+    for container_inst, _ in pairs(invent:GetOpenContainers() or {}) do
+        if container_inst:HasTag("INLIMBO") then
+            table.insert(backpack_list, container_inst)
+        else
+            table.insert(container_list, container_inst)
+        end
+    end
+
+    local function check_and_add_result(cont, slot, item)
+        if
+            item and (not allowed_prefabs or table.contains(allowed_prefabs, item.prefab)) and
+                (not tags_required or item:HasTags(tags_required)) and
+                (not validate_func or validate_func(item, cont, slot))
+         then
+            table.insert(
+                result,
+                {
+                    cont = cont,
+                    slot = slot,
+                    item = item
+                }
+            )
+        end
+    end
+
+    local function check_containers(conts)
+        for _, cont in pairs(conts) do
+            local container = self:GetContainer(cont)
+            -- 241010 VanCa: Stop taking item from "cooker" type container
+            if container and container.type ~= "cooker" then
+                DebugPrint("[ " .. tostring(cont) .. " ]")
+                for slot, item in pairs(container:GetItems()) do
+                    DebugPrint("slot:", slot, "item:", tostring(item))
+                    check_and_add_result(cont, slot, item)
+                end
+            end
+        end
+    end
+
+    for _, storage_name in pairs(order) do
+        if storage_name == "body" then
+            DebugPrint("--- inventory ---")
+            for slot, item in pairs(invent:GetItems()) do
+                DebugPrint("slot:", slot, "item:", tostring(item))
+                check_and_add_result(self.inst, slot, item)
+            end
+        elseif storage_name == "equip" then
+            DebugPrint("--- equip ---")
+            for slot, item in pairs(invent:GetEquips()) do
+                DebugPrint("slot:", slot, "item:", tostring(item))
+                check_and_add_result(self.inst, slot, item)
+            end
+        elseif storage_name == "mouse" then
+            DebugPrint("--- mouse ---")
+            check_and_add_result(self.inst, "mouse", self:GetActiveItem())
+        elseif storage_name == "backpack" then
+            DebugPrint("--- backpack ---")
+            check_containers(backpack_list)
+        elseif storage_name == "container" then
+            DebugPrint("--- containers ---")
+            check_containers(container_list)
+        end
+    end
+
+    DebugPrint("Result:", result)
+    return result
+end
+
+-- return.item: item object
+-- return.slot: item position
+-- return.container: cont_instst
+function ActionQueuer:GetSlotFromAll(allowed_prefabs, tags_required, validate_func, order)
+    return self:GetSlotsFromAll(allowed_prefabs, tags_required, validate_func, order)[1]
+end
+
+-- Pick up a certain item
+function ActionQueuer:TakeActiveItemFromAllOfSlot(cont, slot, item_data)
+    local count = 0
+    while self:GetActiveItem() do
+        if count % 5 == 0 then
+            self.inst.replica.inventory:ReturnActiveItem()
+        end
+        -- Short wait
+        Sleep(self.action_delay)
+        count = count + 1
+        DebugPrint("ReturnActiveItem short wait: ", count)
+    end
+    local container = self:GetContainer(cont)
+    if container then
+        count = 0
+        repeat
+            if count % 5 == 0 then
+                if type(slot) == "number" then
+                    container:TakeActiveItemFromAllOfSlot(slot)
+                else
+                    container:TakeActiveItemFromEquipSlot(slot)
+                end
+            end
+
+            -- Short wait
+            Sleep(self.action_delay)
+            count = count + 1
+            DebugPrint("TakeActiveItem short wait: ", count)
+        until not item_data or self:GetActiveItem() == item_data.item
+    end
+end
+
+function ActionQueuer:GetNewActiveItem(allowed_prefabs, tags_required, validate_func, order)
+    DebugPrint("-------------------------------------")
+    DebugPrint(
+        "GetNewActiveItem: prefabs: ",
+        allowed_prefabs,
+        "tags_required: ",
+        tags_required,
+        "validate_func: ",
+        validate_func
+    )
+
+    -- Make sure allowed_prefabs is a table (or nil)
+    allowed_prefabs =
+        (type(allowed_prefabs) == "string" and allowed_prefabs ~= "" and {allowed_prefabs}) or
+        (type(allowed_prefabs) == "table" and allowed_prefabs) or
+        nil
+
+    local item_data = self:GetSlotFromAll(allowed_prefabs, tags_required, validate_func, order)
+    if item_data then
+        DebugPrint("item_data:", item_data)
+        self:TakeActiveItemFromAllOfSlot(item_data.cont, item_data.slot, item_data)
+        DebugPrint("GetNewActiveItem - Done")
+        return item_data.item
+    end
+
+    -- If we didn't find the required item
+    if allowed_prefabs and table.contains(allowed_prefabs, "goldcoin") and goldenpiggy_data then
+        -- in case the required item was "goldcoin", try to find a goldenpiggy and withdraw from it
+        local goldenpiggy_data = self:GetSlotFromAll("goldenpiggy")
+        if goldenpiggy_data then
+            self.inst.replica.inventory:UseItemFromInvTile(goldenpiggy_data.item)
+        end
+
+        -- long wait
+        Sleep(self.work_delay)
         repeat
             Sleep(self.action_delay)
-        until not (self.inst.sg and self.inst.sg:HasStateTag("moving")) and not self.inst:HasTag("moving")
+        until not (self.inst.sg and self.inst.sg:HasStateTag("moving")) and not self.inst:HasTag("moving") and
+            self.inst:HasTag("idle") and
+            not self.inst.components.playercontroller:IsDoingOrWorking()
+    end
+end
+
+function ActionQueuer:GetNewEquippedItemInHand(allowed_prefabs, tags_required, validate_func, order)
+    DebugPrint("-------------------------------------")
+    DebugPrint("GetNewEquippedItemInHand: prefabs:", allowed_prefabs, "tags_required:", tags_required)
+
+    local item_data = self:GetSlotFromAll(allowed_prefabs, tags_required, validate_func, order)
+    if item_data then
+        DebugPrint("item_data:", item_data)
+        local count = 0
+        repeat
+            if count % 5 == 0 then
+                SendRPCToServer(RPC.ControllerUseItemOnSelfFromInvTile, ACTIONS.EQUIP.code, item_data.item)
+            end
+            -- Short wait
+            Sleep(self.action_delay)
+            count = count + 1
+            DebugPrint("GetNewEquippedItemInHand short wait: ", count)
+        until self:GetEquippedItemInHand() == item_data.item
+        DebugPrint("GetNewEquippedItemInHand - Done")
+        return item_data.item
+    end
+end
+
+-- 250320 VanCa: Unequip Item
+-- not_mouse: if true: can't unequip the equipment on the mouse
+-- roughly determine whether there is an empty slot within the inventory and backpack, if they're already full then return.
+-- reference: 呼吸
+function ActionQueuer:UnEquip(item, not_mouse)
+    DebugPrint("-------------------------------------")
+    DebugPrint("UnEquip item:", tostring(item), "not_mouse: ", not_mouse)
+    local invent = self.inst.replica.inventory
+    if not_mouse then
+        local equips = invent:GetEquips() or {}
+        local backpack
+        for eslot, equip in pairs(equips) do
+            backpack = equip:HasTag("backpack") and equip
+        end
+        local backpack_cont = ActionQueuer:GetContainer(backpack)
+
+        if invent:IsFull() and (not backpack_cont or backpack_cont:IsFull()) then
+            -- Inventory & backpack are full, can't unequip
+            return false
+        end
+    end
+
+    if item and item:HasTag("heavy") then
+        invent:DropItemFromInvTile(item)
+    else
+        if TheWorld and TheWorld.ismastersim then
+            getinvent():ControllerUseItemOnSelfFromInvTile(item)
+        else
+            SendRPCToServer(RPC.ControllerUseItemOnSelfFromInvTile, ACTIONS.UNEQUIP.code, item)
+        end
+    end
+end
+
+function ActionQueuer:Wait(action, target, rightclick)
+    DebugPrint("-------------------------------------")
+    DebugPrint("Wait: action: ", tostring(action), "target: ", tostring(target), "rightclick: ", rightclick)
+    local current_time = GetTime()
+
+    local forceLongWait = false
+    if action == ACTIONS.FILL and rightclick == false then
+        local item_in_hand = self:GetEquippedItemInHand()
+        if item_in_hand and (item_in_hand.prefab == "wateringcan" or item_in_hand.prefab == "premiumwateringcan") then
+            forceLongWait = true
+        end
+    end
+
+    if not forceLongWait and action and CheckAllowedActions("noworkdelay", action, target, self) then
+        DebugPrint("Short wait")
+        while true do
+            Sleep(self.action_delay)
+            if action == ACTIONS.PICKUP then
+                if
+                    not IsValidEntity(target) and not (self.inst.sg and self.inst.sg:HasStateTag("moving")) and
+                        not self.inst:HasTag("moving") or
+                        self.inst:HasTag("idle") or
+                        not self.inst.components.playercontroller:IsDoingOrWorking()
+                 then
+                    break
+                end
+            elseif not (self.inst.sg and self.inst.sg:HasStateTag("moving")) and not self.inst:HasTag("moving") then
+                break
+            end
+        end
     else
         DebugPrint("Long wait")
         Sleep(self.work_delay)
@@ -832,7 +1146,7 @@ function ActionQueuer:Wait(action, target)
     DebugPrint("Time waited:", GetTime() - current_time)
 end
 
-function ActionQueuer:GetAction(target, rightclick, pos)
+function ActionQueuer:GetAction(target, rightclick, pos, active_item, item_in_hand)
     DebugPrint("-------------------------------------")
     DebugPrint("GetAction: target:", tostring(target), "rightclick:", rightclick)
     local pos = pos or target:GetPosition()
@@ -847,20 +1161,20 @@ function ActionQueuer:GetAction(target, rightclick, pos)
     -- Rightclick
     if rightclick then
         if target and target.prefab == "nutrients_overlay" then
-            local equip_item = self:GetEquippedItemInHand()
-            local activeItem = self:GetActiveItem()
+            active_item = active_item or self:GetActiveItem()
+            item_in_hand = item_in_hand or self:GetEquippedItemInHand()
 
             -- Watering farm tile
             if
-                (equip_item and (equip_item.prefab == "wateringcan" or equip_item.prefab == "premiumwateringcan")) or
-                    (activeItem and (activeItem.prefab == "wateringcan" or activeItem.prefab == "premiumwateringcan"))
+                (item_in_hand and (item_in_hand.prefab == "wateringcan" or item_in_hand.prefab == "premiumwateringcan")) or
+                    (active_item and (active_item.prefab == "wateringcan" or active_item.prefab == "premiumwateringcan"))
              then
                 -- Fertilizing farm tile
                 -- Dummy action to get through validates
                 return BufferedAction(self.inst, nil, ACTIONS.POUR_WATER_GROUNDTILE, nil, pos), true
-            elseif activeItem and (activeItem:HasTag("fertilizer")) then
+            elseif active_item and (active_item:HasTag("fertilizer")) then
                 -- Dummy action to get through validates
-                return BufferedAction(self.inst, nil, ACTIONS.DEPLOY_TILEARRIVE, activeItem, pos), true
+                return BufferedAction(self.inst, nil, ACTIONS.DEPLOY_TILEARRIVE, active_item, pos), true
             end
         end
         for _, act in ipairs(playeractionpicker:GetRightClickActions(pos, target)) do
@@ -1029,19 +1343,22 @@ function ActionQueuer:SendActionAndWait(act, rightclick, target)
                 self:GetNewActiveItem(active_item.prefab)
 
                 -- (GIVE action)
-                repeat
+                while true do
                     act = self:GetAction(target, false)
                     if not act or act.action.id ~= "GIVE" then
                         self:Wait()
+                    else
+                        break
                     end
-                until act and act.action.id == "GIVE"
+                end
             end
         end
     else
         -- Non target action (ex: ??)
     end
+
     self:SendAction(act, rightclick, target)
-    self:Wait(act.action, target)
+    self:Wait(act.action, target, rightclick)
 
     -- 250219 VanCa: Prevent once opened Ornate Chest from being added to the selected_list again
     if act.action == ACTIONS.RUMMAGE then
@@ -1053,17 +1370,17 @@ function ActionQueuer:SendActionAndWait(act, rightclick, target)
         local item_in_hand = self:GetEquippedItemInHand()
         if item_in_hand and (item_in_hand.prefab == "wateringcan" or item_in_hand.prefab == "premiumwateringcan") then
             DebugPrint("The holding watering can is full")
-            -- Exclude hand slot
             self:GetNewActiveItem(
                 {"wateringcan", "premiumwateringcan"},
                 nil,
                 function(item)
                     return self:GetItemPercent(item) < 100
-                end,
-                {"container", "body", "backpack", "mouse"}
+                end
             )
         end
     end
+
+    DebugPrint("SendActionAndWait end")
 end
 
 function ActionQueuer:SetHighlightOpacity(opacity)
@@ -1441,6 +1758,19 @@ function ActionQueuer:DoubleClick(rightclick, target)
                 end
             end
         end
+    elseif
+        target.action == ACTIONS.INTERACT_WITH and not target:HasTag("farm_plant_killjoy") and
+            target:HasTags("farm_plant")
+     then
+        -- 250408 VanCa: Won't distinguish between types when talking to plants - except farm_plant_killjoy
+        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
+            if not ent:HasTag("farm_plant_killjoy") and ent:HasTags("farm_plant") then
+                local act, rightclick_ = self:GetAction(ent, rightclick)
+                if act and act.action == target.action then
+                    self:SelectEntity(ent, rightclick_)
+                end
+            end
+        end
     else
         DebugPrint("Not a special target:", target.prefab)
         -- 210705 null: added support for other mods to add their own CherryPick conditions
@@ -1466,6 +1796,9 @@ function ActionQueuer:CherryPick(rightclick)
     DebugPrint("CherryPick: rightclick:", rightclick)
     DebugPrint("self.last_target_ent", tostring(self.last_target_ent))
     local current_time = GetTime()
+    local activeItem
+    local item_in_hand
+
     if current_time - self.last_click.time < self.double_click_speed and self.last_click.prefab then
         DebugPrint("Double click: true")
         DebugPrint("self.last_click.prefab:", self.last_click.prefab)
@@ -1486,7 +1819,7 @@ function ActionQueuer:CherryPick(rightclick)
 
     local allEntitiesUnderMouse = TheInput:GetAllEntitiesUnderMouse()
 
-    local activeItem = self:GetActiveItem()
+    activeItem = self:GetActiveItem()
     if activeItem then
         if activeItem:HasTag("bucket_empty") then
             -- (Dehydrated) Can't get any target entity when taking water from ocean, so create a dummy temporary one
@@ -1526,11 +1859,21 @@ function ActionQueuer:CherryPick(rightclick)
         else
             if IsValidEntity(ent) then
                 DebugPrint("CherryPick > Entity is valid:", tostring(ent))
-                local act, rightclick_ = self:GetAction(ent, rightclick)
-                DebugPrint("act:", act, "rightclick_:", rightclick_)
-                if act then
-                    DebugPrint("action:", act.action)
 
+                -- 250411 VanCa: Support refill watering can with leftclick
+                if not rightclick and not activeItem and ent:HasTag("watersource") then
+                    item_in_hand = self:GetEquippedItemInHand()
+                    if
+                        item_in_hand and
+                            (item_in_hand.prefab == "wateringcan" or item_in_hand.prefab == "premiumwateringcan")
+                     then
+                        rightclick = true
+                    end
+                end
+
+                local act, rightclick_ = self:GetAction(ent, rightclick, nil, activeItem, item_in_hand)
+                DebugPrint("act:", tostring(act), "rightclick_:", rightclick_)
+                if act then
                     if ent.prefab == "nutrients_overlay" then
                         self:SelectFarmTile(ent, rightclick_)
                     else
@@ -1933,258 +2276,6 @@ function ActionQueuer:IsWalkButtonDown()
         CONTROL_MOVE_LEFT,
         CONTROL_MOVE_RIGHT
     )
-end
-
--- Get the items on the mouse
-function ActionQueuer:GetActiveItem(allowed_prefabs)
-    local item = self.inst.replica.inventory:GetActiveItem()
-    DebugPrint("-------------------------------------")
-    DebugPrint("GetActiveItem:", tostring(item))
-
-    -- If no prefab is specified, return GetActiveItem() result
-    if not allowed_prefabs then
-        return item
-    end
-
-    -- If prefab is table, then allowed_prefabs = prefab, if prefab is string allowed_prefabs = {allowed_prefabs}, if else, crash..
-    allowed_prefabs =
-        (type(allowed_prefabs) == "string" and {allowed_prefabs}) or
-        (type(allowed_prefabs) == "table" and allowed_prefabs)
-    -- Return nil if the current active item isn't what we expect
-    return table.contains(allowed_prefabs, item.prefab) and item
-end
-
-function ActionQueuer:GetEquippedItemInHand()
-    DebugPrint("GetEquippedItemInHand")
-    return self.inst.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS)
-end
-
--- Get item durable, reference: 呼吸
--- i: [0 ~ 100]%
-function ActionQueuer:GetItemPercent(inst)
-    local i = 100
-    local classified =
-        type(inst) == "table" and inst.replica and inst.replica.inventoryitem and inst.replica.inventoryitem.classified
-    if classified then
-        if inst:HasOneOfTags({"fresh", "show_spoilage"}) and classified.perish then
-            i = math.floor(classified.perish:value() / 0.62)
-        elseif classified.percentused then
-            i = classified.percentused:value()
-        end
-    end
-    return i
-end
-
--- Get entity's container
-function ActionQueuer:GetContainer(ent)
-    -- DebugPrint("ent:", ent)
-    if ent and ent.replica then
-        return ent.replica.container or ent.replica.inventory
-    end
-end
-
-local order_all = {"container", "equip", "body", "backpack", "mouse"}
--- Get the location of the item and its container. Actually, tags are legacy code [Items under the mouse will only be included if order == ‘mouse’]
--- reference: 呼吸
-function ActionQueuer:GetSlotsFromAll(allowed_prefabs, tags_required, validate_func, order)
-    DebugPrint("-------------------------------------")
-    DebugPrint("GetSlotsFromAll: allowed_prefabs:", allowed_prefabs, "tags_required:", tags_required)
-    local result = {}
-    local invent = self.inst.replica.inventory
-
-    if order == "mouse" then
-        order = order_all
-    elseif type(order) == "string" and table.contains(order_all, order) then
-        order = {order}
-    elseif type(order) == "table" then
-        local temp_order = {}
-        for _, storage_name in pairs(order) do
-            if type(storage_name) == "string" and table.contains(order_all, storage_name) then
-                table.insert(temp_order, storage_name)
-            end
-        end
-        order = temp_order
-    else
-        order = {"container", "equip", "body", "backpack"}
-    end
-
-    -- Make sure tags_required and allowed_prefabs are table, or nil
-    tags_required =
-        (type(tags_required) == "string" and {tags_required}) or (type(tags_required) == "table" and tags_required) or
-        nil
-    allowed_prefabs =
-        (type(allowed_prefabs) == "string" and {allowed_prefabs}) or
-        (type(allowed_prefabs) == "table" and allowed_prefabs) or
-        nil
-
-    local backpack_list, container_list = {}, {}
-    DebugPrint("invent:GetOpenContainers():", invent:GetOpenContainers())
-    for container_inst, _ in pairs(invent:GetOpenContainers() or {}) do
-        if container_inst:HasTag("INLIMBO") then
-            table.insert(backpack_list, container_inst)
-        else
-            table.insert(container_list, container_inst)
-        end
-    end
-
-    local function check_and_add_result(cont, slot, item)
-        if
-            item and (not allowed_prefabs or table.contains(allowed_prefabs, item.prefab)) and
-                (not tags_required or item:HasTags(tags_required)) and
-                (not validate_func or validate_func(item, cont, slot))
-         then
-            table.insert(
-                result,
-                {
-                    cont = cont,
-                    slot = slot,
-                    item = item
-                }
-            )
-        end
-    end
-
-    local function check_containers(conts)
-        for _, cont in pairs(conts) do
-            local container = self:GetContainer(cont)
-            -- 241010 VanCa: Stop taking item from "cooker" type container
-            if container and container.type ~= "cooker" then
-                DebugPrint("[ " .. tostring(cont) .. " ]")
-                for slot, item in pairs(container:GetItems()) do
-                    DebugPrint("slot:", slot, "item:", tostring(item))
-                    check_and_add_result(cont, slot, item)
-                end
-            end
-        end
-    end
-
-    for _, storage_name in pairs(order) do
-        if storage_name == "body" then
-            DebugPrint("--- inventory ---")
-            for slot, item in pairs(invent:GetItems()) do
-                DebugPrint("slot:", slot, "item:", tostring(item))
-                check_and_add_result(self.inst, slot, item)
-            end
-        elseif storage_name == "equip" then
-            DebugPrint("--- equip ---")
-            for slot, item in pairs(invent:GetEquips()) do
-                DebugPrint("slot:", slot, "item:", tostring(item))
-                check_and_add_result(self.inst, slot, item)
-            end
-        elseif storage_name == "mouse" then
-            DebugPrint("--- mouse ---")
-            check_and_add_result(self.inst, "mouse", self:GetActiveItem())
-        elseif storage_name == "backpack" then
-            DebugPrint("--- backpack ---")
-            check_containers(backpack_list)
-        elseif storage_name == "container" then
-            DebugPrint("--- containers ---")
-            check_containers(container_list)
-        end
-    end
-
-    DebugPrint("Result:", result)
-    return result
-end
-
--- return.item: item object
--- return.slot: item position
--- return.container: cont_instst
-function ActionQueuer:GetSlotFromAll(allowed_prefabs, tags_required, validate_func, order)
-    return self:GetSlotsFromAll(allowed_prefabs, tags_required, validate_func, order)[1]
-end
-
-function ActionQueuer:GetNewActiveItem(allowed_prefabs, tags_required, validate_func, order)
-    DebugPrint("-------------------------------------")
-    DebugPrint(
-        "GetNewActiveItem: prefabs: ",
-        allowed_prefabs,
-        "tags_required: ",
-        tags_required,
-        "validate_func: ",
-        validate_func
-    )
-
-    -- Make sure allowed_prefabs is a table (or nil)
-    allowed_prefabs =
-        (type(allowed_prefabs) == "string" and allowed_prefabs ~= "" and {allowed_prefabs}) or
-        (type(allowed_prefabs) == "table" and allowed_prefabs) or
-        nil
-
-    local item_data = self:GetSlotFromAll(allowed_prefabs, tags_required, validate_func, order)
-    if item_data then
-        DebugPrint("item_data:", item_data)
-        local container = self:GetContainer(item_data.cont)
-        repeat
-            container:TakeActiveItemFromAllOfSlot(item_data.slot)
-            self:Wait()
-        until self:GetActiveItem() == item_data.item
-        DebugPrint("GetNewActiveItem - Done")
-        return item_data.item
-    end
-
-    -- If we didn't find the required item
-    if allowed_prefabs and table.contains(allowed_prefabs, "goldcoin") and goldenpiggy_data then
-        -- in case the required item was "goldcoin", try to find a goldenpiggy and withdraw from it
-        local goldenpiggy_data = self:GetSlotFromAll("goldenpiggy")
-        if goldenpiggy_data then
-            self.inst.replica.inventory:UseItemFromInvTile(goldenpiggy_data.item)
-        end
-
-        -- long wait
-        Sleep(self.work_delay)
-        repeat
-            Sleep(self.action_delay)
-        until not (self.inst.sg and self.inst.sg:HasStateTag("moving")) and not self.inst:HasTag("moving") and
-            self.inst:HasTag("idle") and
-            not self.inst.components.playercontroller:IsDoingOrWorking()
-    end
-end
-
-function ActionQueuer:GetNewEquippedItemInHand(allowed_prefabs, tags_required, validate_func, order)
-    DebugPrint("-------------------------------------")
-    DebugPrint("GetNewEquippedItemInHand: prefabs:", allowed_prefabs, "tags_required:", tags_required)
-
-    local item_data = self:GetSlotFromAll(allowed_prefabs, tags_required, validate_func, order)
-    if item_data then
-        DebugPrint("item_data:", item_data)
-        SendRPCToServer(RPC.ControllerUseItemOnSelfFromInvTile, ACTIONS.EQUIP.code, item_data.item)
-        DebugPrint("GetNewEquippedItemInHand - Done")
-        return item_data.item
-    end
-end
-
--- 250320 VanCa: Unequip Item
--- not_mouse: if true: can't unequip the equipment on the mouse
--- roughly determine whether there is an empty slot within the inventory and backpack, if they're already full then return.
--- reference: 呼吸
-function ActionQueuer:UnEquip(item, not_mouse)
-    DebugPrint("-------------------------------------")
-    DebugPrint("UnEquip item:", tostring(item), "not_mouse: ", not_mouse)
-    local invent = self.inst.replica.inventory
-    if not_mouse then
-        local equips = invent:GetEquips() or {}
-        local backpack
-        for eslot, equip in pairs(equips) do
-            backpack = equip:HasTag("backpack") and equip
-        end
-        local backpack_cont = ActionQueuer:GetContainer(backpack)
-
-        if invent:IsFull() and (not backpack_cont or backpack_cont:IsFull()) then
-            -- Inventory & backpack are full, can't unequip
-            return false
-        end
-    end
-
-    if item and item:HasTag("heavy") then
-        invent:DropItemFromInvTile(item)
-    else
-        if TheWorld and TheWorld.ismastersim then
-            getinvent():ControllerUseItemOnSelfFromInvTile(item)
-        else
-            SendRPCToServer(RPC.ControllerUseItemOnSelfFromInvTile, ACTIONS.UNEQUIP.code, item)
-        end
-    end
 end
 
 function ActionQueuer:DeployActiveItem(pos, item)
@@ -2602,8 +2693,8 @@ function ActionQueuer:GetClosestTarget(active_item)
                 DebugPrint("Check ent:", tostring(ent))
                 local skip_ent = false
                 local rightclick = self.selected_ents[ent]
-                local holding_item = self:GetActiveItem()
-                DebugPrint("Active item:", tostring(holding_item))
+                local active_item_right_now = self:GetActiveItem()
+                DebugPrint("Active item:", tostring(active_item_right_now))
 
                 if ent.prefab == "well" and not self.selected_ents[ent] then
                     -- (Dehydrated) Well - left click
@@ -2664,11 +2755,11 @@ function ActionQueuer:GetClosestTarget(active_item)
                     -- (Dehydrated) Desalinator - left click
 
                     if
-                        (ent.replica.waterlevel._accepting:value() and holding_item and
-                            holding_item.prefab == "water_salty") or
-                            (ent.AnimState:IsCurrentAnimation("idle_open") and holding_item and
-                                holding_item:HasTag("watertaker")) or
-                            (ent:HasTag("pickable") and not holding_item)
+                        (ent.replica.waterlevel._accepting:value() and active_item_right_now and
+                            active_item_right_now.prefab == "water_salty") or
+                            (ent.AnimState:IsCurrentAnimation("idle_open") and active_item_right_now and
+                                active_item_right_now:HasTag("watertaker")) or
+                            (ent:HasTag("pickable") and not active_item_right_now)
                      then
                         -- Desalinator if more complicated than others because it has 3 states to consider
                         -- (waiting for salty water, ready to collect clean water, ready to collect salt)
@@ -2704,22 +2795,23 @@ function ActionQueuer:GetClosestTarget(active_item)
                 elseif
                     ent:HasTag("watersource") and active_item and
                         (active_item.prefab == "wateringcan" or active_item.prefab == "premiumwateringcan") and
-                        not self:GetActiveItem()
+                        not active_item_right_now
                  then
                     -- 250307 VanCa: support switching wateringCan when refilling (leftclick)
-                    -- Exclude hand slot
                     active_item =
                         self:GetNewActiveItem(
                         {"wateringcan", "premiumwateringcan"},
                         nil,
                         function(item)
                             return self:GetItemPercent(item) < 100
-                        end,
-                        {"container", "body", "backpack", "mouse"}
+                        end
                     ) or active_item
                 elseif ent.prefab == "gravestone" and active_item and active_item.prefab == "graveurn" then
                     -- 250304 VanCa: Auto switch to unused graveurn when 'GRAVEDIG'ing with Wendy skill
-                    if holding_item and holding_item.prefab == "graveurn" and holding_item:HasTag("deployable") then
+                    if
+                        active_item_right_now and active_item_right_now.prefab == "graveurn" and
+                            active_item_right_now:HasTag("deployable")
+                     then
                         active_item =
                             self:GetNewActiveItem(
                             {"graveurn"},
@@ -2790,13 +2882,13 @@ function ActionQueuer:GetClosestTarget(active_item)
             -- If there is a change in selected ents, find clostest target again
             if #self.selected_ents_sortable ~= total_selected_ents then
                 DebugPrint("Selected new Entities, find closest target again")
-                target = self:GetClosestTarget(active_item)
+                target, active_item, act = self:GetClosestTarget(active_item)
             end
         end
     end
 
     DebugPrint("Closest target:", tostring(target))
-    return target
+    return target, active_item, act
 end
 
 function ActionQueuer:WaitToolReEquip()
@@ -2852,22 +2944,21 @@ function ActionQueuer:ApplyToSelection()
             DebugPrint("active_item:", active_item)
             while self.inst:IsValid() do
                 DebugPrint("self.inst is Valid")
-                local target = self:GetClosestTarget(active_item)
+                -- Update active_item in case we manually picked a new active item when stuck in finding the closest target
+                local target, active_item, act = self:GetClosestTarget(active_item)
                 if not target then
                     break
                 end
-                -- Update active_item in case we manually picked a new active item when stuck in finding the closest target
-                active_item = active_item and self:GetActiveItem() or active_item
                 local highlight = target.components.highlight
                 local rightclick = self.selected_ents[target]
                 local pos = target:GetPosition()
-                local act = self:GetAction(target, rightclick, pos)
+                if not act then
+                    act = self:GetAction(target, rightclick, pos, active_item)
+                end
                 if act and act:IsValid() then
                     DebugPrint("act is valid")
                     local tool_action = allowed_actions.tools[act.action]
                     DebugPrint("tool_action:", tool_action)
-                    local auto_collect = CheckAllowedActions("autocollect", act.action, target, self)
-                    DebugPrint("auto_collect:", auto_collect)
 
                     -- 250320 VanCa: Server won't excute these two actions on farm plants while Wormwood's holding a shovel
                     -- He can only check ASSESSPLANTHAPPINESS while holding a shovel, so this part auto unequip it
@@ -2907,15 +2998,13 @@ function ActionQueuer:ApplyToSelection()
                                                 target:HasTag("watersource")
                                          then
                                             -- 250307 VanCa: support switching wateringCan when refilling (leftclick)
-                                            -- Exclude hand slot
                                             active_item =
                                                 self:GetNewActiveItem(
                                                 {"wateringcan", "premiumwateringcan"},
                                                 nil,
                                                 function(item)
                                                     return self:GetItemPercent(item) < 100
-                                                end,
-                                                {"container", "body", "backpack", "mouse"}
+                                                end
                                             ) or active_item
                                         else
                                             active_item = self:GetNewActiveItem(active_item.prefab) or active_item
@@ -2969,11 +3058,15 @@ function ActionQueuer:ApplyToSelection()
                         DebugPrint("tool_action. WaitToolReEquip")
                         self:WaitToolReEquip()
                     end
-                    if self.auto_collect and auto_collect then
-                        DebugPrint("Auto collect loot")
-                        Sleep(FRAMES)
-                        pos = moving_target[target.prefab] and self.inst:GetPosition() or pos
-                        self:AutoCollect(pos, false)
+                    if self.auto_collect then
+                        local auto_collect = CheckAllowedActions("autocollect", act.action, target, self)
+                        DebugPrint("auto_collect:", auto_collect)
+                        if auto_collect then
+                            DebugPrint("Auto collect loot")
+                            Sleep(FRAMES)
+                            pos = moving_target[target.prefab] and self.inst:GetPosition() or pos
+                            self:AutoCollect(pos, false)
+                        end
                     end
                 else
                     DebugPrint("No act or invalid")
