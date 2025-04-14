@@ -518,7 +518,7 @@ AddAction(
     "rightclick",
     "LIGHT",
     function(target)
-        return target:HasTag("tree")
+        return target:HasTag("tree") or target:HasTag("plant")
     end
 )
 
@@ -573,7 +573,8 @@ AddActionList(
     "ADDCOMPOSTABLE",
     "DEPLOY_TILEARRIVE",
     "PICKUP",
-    "LIGHT"
+    "LIGHT",
+    "ERASE_PAPER" -- 250114 VanCa: Added ERASE_PAPER to noworkdelay list
 )
 
 AddAction(
@@ -980,11 +981,12 @@ function ActionQueuer:TakeActiveItemFromAllOfSlot(cont, slot, item_data)
     while self:GetActiveItem() do
         if count % 5 == 0 then
             self.inst.replica.inventory:ReturnActiveItem()
+        else
+            -- Short wait
+            Sleep(self.action_delay)
+            DebugPrint("ReturnActiveItem short wait: ", count - math.floor(count / 5))
         end
-        -- Short wait
-        Sleep(self.action_delay)
         count = count + 1
-        DebugPrint("ReturnActiveItem short wait: ", count)
     end
     local container = self:GetContainer(cont)
     if container then
@@ -996,12 +998,12 @@ function ActionQueuer:TakeActiveItemFromAllOfSlot(cont, slot, item_data)
                 else
                     container:TakeActiveItemFromEquipSlot(slot)
                 end
+            else
+                -- Short wait
+                Sleep(self.action_delay)
+                DebugPrint("TakeActiveItem short wait: ", count - math.floor(count / 5))
             end
-
-            -- Short wait
-            Sleep(self.action_delay)
             count = count + 1
-            DebugPrint("TakeActiveItem short wait: ", count)
         until not item_data or self:GetActiveItem() == item_data.item
     end
 end
@@ -1016,7 +1018,7 @@ function ActionQueuer:GetNewActiveItem(allowed_prefabs, tags_required, validate_
         "validate_func: ",
         validate_func
     )
-
+    local current_time = GetTime()
     -- Make sure allowed_prefabs is a table (or nil)
     allowed_prefabs =
         (type(allowed_prefabs) == "string" and allowed_prefabs ~= "" and {allowed_prefabs}) or
@@ -1028,30 +1030,27 @@ function ActionQueuer:GetNewActiveItem(allowed_prefabs, tags_required, validate_
         DebugPrint("item_data:", item_data)
         self:TakeActiveItemFromAllOfSlot(item_data.cont, item_data.slot, item_data)
         DebugPrint("GetNewActiveItem - Done")
+        DebugPrint("Time took: ", GetTime() - current_time)
         return item_data.item
     end
 
     -- If we didn't find the required item
-    if allowed_prefabs and table.contains(allowed_prefabs, "goldcoin") and goldenpiggy_data then
+    if allowed_prefabs and table.contains(allowed_prefabs, "goldcoin") then
         -- in case the required item was "goldcoin", try to find a goldenpiggy and withdraw from it
         local goldenpiggy_data = self:GetSlotFromAll("goldenpiggy")
         if goldenpiggy_data then
             self.inst.replica.inventory:UseItemFromInvTile(goldenpiggy_data.item)
-        end
 
-        -- long wait
-        Sleep(self.work_delay)
-        repeat
-            Sleep(self.action_delay)
-        until not (self.inst.sg and self.inst.sg:HasStateTag("moving")) and not self.inst:HasTag("moving") and
-            self.inst:HasTag("idle") and
-            not self.inst.components.playercontroller:IsDoingOrWorking()
+            -- long wait
+            self:Wait()
+        end
     end
 end
 
 function ActionQueuer:GetNewEquippedItemInHand(allowed_prefabs, tags_required, validate_func, order)
     DebugPrint("-------------------------------------")
     DebugPrint("GetNewEquippedItemInHand: prefabs:", allowed_prefabs, "tags_required:", tags_required)
+    local current_time = GetTime()
 
     local item_data = self:GetSlotFromAll(allowed_prefabs, tags_required, validate_func, order)
     if item_data then
@@ -1060,13 +1059,15 @@ function ActionQueuer:GetNewEquippedItemInHand(allowed_prefabs, tags_required, v
         repeat
             if count % 5 == 0 then
                 SendRPCToServer(RPC.ControllerUseItemOnSelfFromInvTile, ACTIONS.EQUIP.code, item_data.item)
+            else
+                -- Short wait
+                Sleep(self.action_delay)
+                DebugPrint("GetNewEquippedItemInHand short wait: ", count - math.floor(count / 5))
             end
-            -- Short wait
-            Sleep(self.action_delay)
             count = count + 1
-            DebugPrint("GetNewEquippedItemInHand short wait: ", count)
         until self:GetEquippedItemInHand() == item_data.item
         DebugPrint("GetNewEquippedItemInHand - Done")
+        DebugPrint("Time took: ", GetTime() - current_time)
         return item_data.item
     end
 end
@@ -1602,16 +1603,17 @@ function ActionQueuer:DoubleClick(rightclick, target)
             end
         end
     elseif
-        (target.prefab == "evergreen" or -- 210315 null: lvl 3 evergreen (blizstorm / Tranoze)
-            target.prefab == "deciduoustree" or -- 210315 null: lvl 3 deciduous (blizstorm)
-            target.prefab == "moon_tree" or -- 210322 null: lvl 3 lune trees
-            target.prefab == "twiggytree" or -- 210322 null: lvl 3 twiggy trees
-            target.prefab == "palmconetree" or -- 221010 cutlass: lvl 3 palmcone treesv
-            target.prefab == "evergreen_sparse") and -- 240930 VanCa: lvl 3 Lumpy Evergreen | Cutlass updated this in ver 2.8
-            target.action == ACTIONS.CHOP and
-            (target.AnimState:IsCurrentAnimation("sway1_loop_tall") or -- Only check for lvl3/tall trees
+        (target.action == ACTIONS.CHOP or target.action == ACTIONS.LIGHT) and
+            -- 250414 VanCa: When Chopping or Lighting
+            (target.prefab == "evergreen" or -- 210315 null: lvl 3 evergreen (blizstorm / Tranoze)
+                target.prefab == "deciduoustree" or -- 210315 null: lvl 3 deciduous (blizstorm)
+                target.prefab == "moon_tree" or -- 210322 null: lvl 3 lune trees
+                target.prefab == "twiggytree" or -- 210322 null: lvl 3 twiggy trees
+                target.prefab == "palmconetree" or -- 221010 cutlass: lvl 3 palmcone treesv
+                target.prefab == "evergreen_sparse") and -- 240930 VanCa: lvl 3 Lumpy Evergreen | Cutlass updated this in ver 2.8
+            (target.AnimState:IsCurrentAnimation("sway1_loop_tall") or
                 target.AnimState:IsCurrentAnimation("sway2_loop_tall"))
-     then
+     then -- Only check for lvl3/tall trees
         DebugPrint("Target is a lv3 tree:", target.prefab)
         -- 210322 null: support for isolating mining of lvl 3 marble trees
         -- Only check for lvl3/tall trees. Otherwise default to original CherryPick code.
@@ -1627,14 +1629,14 @@ function ActionQueuer:DoubleClick(rightclick, target)
             end
         end
     elseif target.prefab == "deciduoustree" and target:HasTag("monster") then
-        -- 241030 VanCa: Chopping Poison Birchnut Tree won't select all nearby trees
+        -- 241030 VanCa: Chopping/lighting Poison Birchnut Tree won't select all nearby trees
         for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
             if ent.prefab == "deciduoustree" and ent:HasTag("monster") then
                 self:SelectEntity(ent, rightclick)
             end
         end
-    elseif target:HasTags({"tree", "DIG_workable"}) and target.action == ACTIONS.DIG then
-        -- 241028 VanCa: Do not distinguish between tree stumps when digging up roots
+    elseif (target.action == ACTIONS.DIG or target.action == ACTIONS.LIGHT) and target:HasTags({"tree", "DIG_workable"}) then
+        -- 241028 VanCa: Do not distinguish between tree stumps when lighting/digging up roots
         for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
             if ent:HasTags({"tree", "DIG_workable"}) then
                 self:SelectEntity(ent, rightclick)
@@ -1765,6 +1767,30 @@ function ActionQueuer:DoubleClick(rightclick, target)
         -- 250408 VanCa: Won't distinguish between types when talking to plants - except farm_plant_killjoy
         for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
             if not ent:HasTag("farm_plant_killjoy") and ent:HasTags("farm_plant") then
+                local act, rightclick_ = self:GetAction(ent, rightclick)
+                if act and act.action == target.action then
+                    self:SelectEntity(ent, rightclick_)
+                end
+            end
+        end
+    elseif table.contains({"chessjunk1", "chessjunk2", "chessjunk3"}, target.prefab) then
+        -- 250414 VanCa: Won't distinguish between Broken Clockworks types
+        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
+            if table.contains({"chessjunk1", "chessjunk2", "chessjunk3"}, ent.prefab) then
+                local act, rightclick_ = self:GetAction(ent, rightclick)
+                if act and act.action == target.action then
+                    self:SelectEntity(ent, rightclick_)
+                end
+            end
+        end
+    elseif target.action == ACTIONS.PICK and table.contains({"flower_cave", "flower_cave_double"}, target.prefab) then
+        -- 250414 VanCa: Select all Light Flowers that have equal or better quality.
+        local allow_list = {"flower_cave_double", "flower_cave_triple"}
+        if target.prefab == "flower_cave" then
+            table.insert(allow_list, "flower_cave")
+        end
+        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
+            if table.contains(allow_list, ent.prefab) then
                 local act, rightclick_ = self:GetAction(ent, rightclick)
                 if act and act.action == target.action then
                     self:SelectEntity(ent, rightclick_)
