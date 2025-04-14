@@ -1625,7 +1625,10 @@ function ActionQueuer:DoubleClick(rightclick, target)
                     (ent.AnimState:IsCurrentAnimation("sway1_loop_tall") or
                         ent.AnimState:IsCurrentAnimation("sway2_loop_tall"))
              then
-                self:SelectEntity(ent, false)
+                local act, rightclick_ = self:GetAction(ent, rightclick)
+                if act and act.action == target.action then
+                    self:SelectEntity(ent, rightclick_)
+                end
             end
         end
     elseif target.prefab == "deciduoustree" and target:HasTag("monster") then
@@ -1639,7 +1642,10 @@ function ActionQueuer:DoubleClick(rightclick, target)
         -- 241028 VanCa: Do not distinguish between tree stumps when lighting/digging up roots
         for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
             if ent:HasTags({"tree", "DIG_workable"}) then
-                self:SelectEntity(ent, rightclick)
+                local act, rightclick_ = self:GetAction(ent, rightclick)
+                if act and act.action == target.action then
+                    self:SelectEntity(ent, rightclick_)
+                end
             end
         end
     elseif
