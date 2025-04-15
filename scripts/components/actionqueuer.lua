@@ -170,7 +170,8 @@ AddActionList(
     "WAX",
     "GRAVEDIG", -- 250304 VanCa: Added support for Wendy's skill
     "FT_CUTFUNGI", -- 250410 VanCa: Added support for shaving Candle Tree in Fairy Tales mod
-    "MYTH_YJP_GIVE" -- 250412 VanCa: Added support for reviving giant plant with Myth mod's bottle
+    "MYTH_YJP_GIVE", -- 250412 VanCa: Added support for reviving giant plant with Myth mod's bottle
+    "ADD_CARD_TO_DECK" -- 250415 VanCa: Added support for stack JIMBO cards
 )
 
 -- 250320 VanCa: Prevent endless loop between 2 Catapults
@@ -438,7 +439,8 @@ AddActionList(
     "OCEAN_TRAWLER_LOWER",
     "OCEAN_TRAWLER_RAISE",
     "SCYTHE",
-    "START_PUSHING"
+    "START_PUSHING",
+    "DRAW_FROM_DECK" -- 250415 VanCa: Added support for draw JIMBO cards from deck
 )
 
 -- 201218 null: added support for right click PICK while equipping plantregistryhat
@@ -574,7 +576,8 @@ AddActionList(
     "DEPLOY_TILEARRIVE",
     "PICKUP",
     "LIGHT",
-    "ERASE_PAPER" -- 250114 VanCa: Added ERASE_PAPER to noworkdelay list
+    "ERASE_PAPER", -- 250114 VanCa: Added ERASE_PAPER to noworkdelay list
+    "DRAW_FROM_DECK" -- 250114 VanCa
 )
 
 AddAction(
@@ -836,8 +839,9 @@ end
 
 function ActionQueuer:GetEquippedItemInHand()
     DebugPrint("-------------------------------------")
-    DebugPrint("GetEquippedItemInHand")
-    return self.inst.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS)
+    local item_in_hand = self.inst.replica.inventory:GetEquippedItem(EQUIPSLOTS.HANDS)
+    DebugPrint("GetEquippedItemInHand: ", tostring(item_in_hand))
+    return item_in_hand
 end
 
 -- Get item durable, reference: 呼吸
@@ -1098,7 +1102,7 @@ function ActionQueuer:UnEquip(item, not_mouse)
         invent:DropItemFromInvTile(item)
     else
         if TheWorld and TheWorld.ismastersim then
-            getinvent():ControllerUseItemOnSelfFromInvTile(item)
+            invent:ControllerUseItemOnSelfFromInvTile(item)
         else
             SendRPCToServer(RPC.ControllerUseItemOnSelfFromInvTile, ACTIONS.UNEQUIP.code, item)
         end
@@ -1371,16 +1375,28 @@ function ActionQueuer:SendActionAndWait(act, rightclick, target)
         local item_in_hand = self:GetEquippedItemInHand()
         if item_in_hand and (item_in_hand.prefab == "wateringcan" or item_in_hand.prefab == "premiumwateringcan") then
             DebugPrint("The holding watering can is full")
-            self:GetNewActiveItem(
-                {"wateringcan", "premiumwateringcan"},
-                nil,
-                function(item)
-                    return self:GetItemPercent(item) < 100
-                end
-            )
+            if
+                not self:GetNewActiveItem(
+                    {"wateringcan", "premiumwateringcan"},
+                    nil,
+                    function(item)
+                        return self:GetItemPercent(item) < 100
+                    end
+                )
+             then
+                self:DeselectEntity(target)
+            end
         end
     end
 
+    -- 250415 VanCa: Auto drop the deck when stacking cards
+    if act.action == ACTIONS.ADD_CARD_TO_DECK and target.prefab == "playing_card" then
+        local active_item = self:GetActiveItem()
+        if active_item and active_item.prefab == "deck_of_cards" then
+            self:DropActiveItem(self.inst:GetPosition(), active_item)
+            self:SelectEntity(active_item, rightclick)
+        end
+    end
     DebugPrint("SendActionAndWait end")
 end
 
@@ -3081,10 +3097,13 @@ function ActionQueuer:ApplyToSelection()
                     self:CheckEntityMorph(target.prefab, pos, rightclick)
                     if active_item and not self:GetActiveItem() then
                         -- Sleep(self.action_delay)
-                        local temp_item = self:GetNewActiveItem(active_item.prefab)
-                        if temp_item then
-                            DebugPrint("equiped new active item")
-                            active_item = temp_item
+                        if
+                            not ((active_item.prefab == "wateringcan" or active_item.prefab == "premiumwateringcan") and
+                                target:HasTag("watersource"))
+                         then
+                            -- 250415 VanCa: This line run after all watering can have been filled and the pond has been deselected
+                            -- so no need to pick up new watering can in this case
+                            active_item = self:GetNewActiveItem(active_item.prefab) or active_item
                         end
                     elseif tool_action then
                         DebugPrint("tool_action. WaitToolReEquip")
