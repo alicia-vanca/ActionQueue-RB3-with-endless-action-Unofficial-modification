@@ -253,7 +253,7 @@ AddAction(
     "leftclick",
     "READ",
     function(target)
-        local active_item = ThePlayer.components.playeravatardata.inst.replica.inventory:GetActiveItem()
+        local active_item = self:GetActiveItem()
         return active_item and active_item.AnimState and active_item.AnimState:GetBuild() == "books" and
             target == ThePlayer -- 210226 null: only queue READ if ThePlayer is using a book on themselves
     end
@@ -440,7 +440,8 @@ AddActionList(
     "OCEAN_TRAWLER_RAISE",
     "SCYTHE",
     "START_PUSHING",
-    "DRAW_FROM_DECK" -- 250415 VanCa: Added support for draw JIMBO cards from deck
+    "DRAW_FROM_DECK", -- 250415 VanCa: Added support for draw JIMBO cards from deck
+    "PICKUP" -- 250427 VanCa: Support pickup spider
 )
 
 -- 201218 null: added support for right click PICK while equipping plantregistryhat
@@ -550,6 +551,16 @@ AddAction(
     end
 )
 
+-- 250427 cutglass: Picking items on the ground with Knabsack for Wortox
+AddAction(
+    "rightclick",
+    "NABBAG",
+    function(target)
+        return target.prefab ~= "trap" and target.prefab ~= "birdtrap" and not target:HasTag("mineactive") and
+            not target:HasTag("minesprung")
+    end
+)
+
 --[[single]]
 AddActionList("single", "CASTSPELL", "DECORATEVASE", "REPAIR_LEAK")
 
@@ -564,7 +575,6 @@ AddActionList(
     "DRY",
     "EAT",
     "FERTILIZE",
-    "FILL",
     "HAMMER",
     "HARVEST",
     "HEAL",
@@ -587,11 +597,29 @@ AddAction(
         return target:HasTag("trader")
     end
 )
+
 AddAction(
     "noworkdelay",
     "NET",
     function(target)
         return not ThePlayer.components.locomotor or not target:HasTag("butterfly")
+    end
+)
+
+AddAction(
+    "noworkdelay",
+    "FILL",
+    function(target, self)
+        local item_in_hand = self:GetEquippedItemInHand()
+        if item_in_hand and (item_in_hand.prefab == "wateringcan" or item_in_hand.prefab == "premiumwateringcan") then
+            return false
+        else
+            local active_item = self:GetActiveItem()
+            if active_item and (active_item.prefab == "wateringcan" or active_item.prefab == "premiumwateringcan") then
+                return false
+            end
+        end
+        return true
     end
 )
 
@@ -933,7 +961,8 @@ function ActionQueuer:GetSlotsFromAll(allowed_prefabs, tags_required, validate_f
         for _, cont in pairs(conts) do
             local container = self:GetContainer(cont)
             -- 241010 VanCa: Stop taking item from "cooker" type container
-            if container and container.type ~= "cooker" then
+            -- 250428 VanCa: Allow taking item from frostpack (Casino host)
+            if container and (container.type ~= "cooker" or container.inst.prefab == "frostpack") then
                 DebugPrint("[ " .. tostring(cont) .. " ]")
                 for slot, item in pairs(container:GetItems()) do
                     DebugPrint("slot:", slot, "item:", tostring(item))
@@ -1114,15 +1143,7 @@ function ActionQueuer:Wait(action, target, rightclick)
     DebugPrint("Wait: action: ", tostring(action), "target: ", tostring(target), "rightclick: ", rightclick)
     local current_time = GetTime()
 
-    local forceLongWait = false
-    if action == ACTIONS.FILL and rightclick == false then
-        local item_in_hand = self:GetEquippedItemInHand()
-        if item_in_hand and (item_in_hand.prefab == "wateringcan" or item_in_hand.prefab == "premiumwateringcan") then
-            forceLongWait = true
-        end
-    end
-
-    if not forceLongWait and action and CheckAllowedActions("noworkdelay", action, target, self) then
+    if action and CheckAllowedActions("noworkdelay", action, target, self) then
         DebugPrint("Short wait")
         while true do
             Sleep(self.action_delay)
@@ -1130,8 +1151,8 @@ function ActionQueuer:Wait(action, target, rightclick)
                 if
                     not IsValidEntity(target) and not (self.inst.sg and self.inst.sg:HasStateTag("moving")) and
                         not self.inst:HasTag("moving") or
-                        self.inst:HasTag("idle") or
-                        not self.inst.components.playercontroller:IsDoingOrWorking()
+                        self.inst:HasTag("idle")
+                        -- or not self.inst.components.playercontroller:IsDoingOrWorking()
                  then
                     break
                 end
@@ -1183,7 +1204,7 @@ function ActionQueuer:GetAction(target, rightclick, pos, active_item, item_in_ha
             end
         end
         for _, act in ipairs(playeractionpicker:GetRightClickActions(pos, target)) do
-            DebugPrint("check right click act:", act.action)
+            DebugPrint("check right click act:", act.action.id)
             if CheckAllowedActions("rightclick", act.action, target, self) then
                 DebugPrint("Allowed rightclick action:", act.action.id)
                 return act, true
@@ -1733,6 +1754,19 @@ function ActionQueuer:DoubleClick(rightclick, target)
                     if ent.takeitem:value().prefab == target.takeitem:value().prefab then
                         self:SelectEntity(ent, rightclick_)
                     end
+                end
+            end
+        end
+    elseif
+        target.action == ACTIONS.DIG and target.prefab == "weed_forgetmelots" and
+            target.AnimState:IsCurrentAnimation("crop_bloomed")
+     then
+        -- 250321 VanCa: Only select old forget-me-not when digging old forget-me-not
+        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
+            if ent.prefab == "weed_forgetmelots" and ent.AnimState:IsCurrentAnimation("crop_bloomed") then
+                local act, rightclick_ = self:GetAction(ent, rightclick)
+                if act and act.action == target.action then
+                    self:SelectEntity(ent, rightclick_)
                 end
             end
         end
@@ -2663,7 +2697,7 @@ function ActionQueuer:TerraformAtPoint(pos, item)
     return true
 end
 
-function ActionQueuer:TakeBucket()
+function ActionQueuer:TakeBucket(state)
     local bucket_list = {
         "bucket_empty",
         "bucket_woodie_empty",
@@ -2674,11 +2708,17 @@ function ActionQueuer:TakeBucket()
         -- if we're holding a bucket already then return
         return active_item
     end
-    -- try to take a bucket
-    return self:GetNewActiveItem(bucket_list)
+    if not TUNING.TARGET_SELECTION == "optimal" or #state.targets == 0 then
+        -- Try to take a bucket
+        local new_active_item = self:GetNewActiveItem(bucket_list)
+        if new_active_item then
+            state.is_active_item_changed = true
+        end
+        return new_active_item
+    end
 end
 
-function ActionQueuer:TakeDirtyWater()
+function ActionQueuer:TakeDirtyWater(state)
     local active_item = self:GetActiveItem()
     if active_item and table.contains({"water_dirty", "water_dirty_ice"}, active_item.prefab) then
         -- if we're holding dirty water already then return
@@ -2688,7 +2728,7 @@ function ActionQueuer:TakeDirtyWater()
     return self:GetNewActiveItem({"water_dirty", "water_dirty_ice"})
 end
 
-function ActionQueuer:TakeSaltyWater()
+function ActionQueuer:TakeSaltyWater(state)
     local active_item = self:GetActiveItem()
     if active_item and active_item.prefab == "water_salty" then
         -- if we're holding salty water already then return
@@ -2698,10 +2738,143 @@ function ActionQueuer:TakeSaltyWater()
     return self:GetNewActiveItem("water_salty")
 end
 
+-- 250429 VanCa: Evaluate all paths with debug prints
+local function getOptimalTarget(targets, initial_pos, candidate_num, max_depth, neighbor_range)
+    if #targets == 0 then
+        return nil
+    elseif #targets == 1 then
+        DebugPrint("Distance:", initial_pos:DistSq(targets[1]:GetPosition()))
+        return targets[1]
+    end
+
+    -- Precompute distances to avoid redundant calculations
+    local pairwise_distances = {} -- Distance between pairs of targets
+    for _, t in ipairs(targets) do
+        pairwise_distances[t.GUID] = {}
+    end
+
+    candidate_num = candidate_num or math.huge
+    max_depth = max_depth or math.huge
+    neighbor_range = neighbor_range or 0
+    local path_count = 0
+    local best_total = math.huge
+    local best_target = nil
+    local best_path_str = ""
+
+    local function generatePaths(current_target, targets, visited, current_path, current_total, depth)
+        if depth == math.min(max_depth, #targets) or current_total >= best_total then
+            path_count = path_count + 1
+            local path_str = ""
+            for i, t in ipairs(current_path) do
+                if i > 1 then
+                    path_str = path_str .. " → "
+                end
+                path_str = path_str .. t.GUID
+                if i == 1 then
+                    path_str = path_str .. string.format(" (%.2f)", t.distance)
+                end
+            end
+            if depth < math.min(max_depth, #targets) then
+                path_str = path_str .. " Bad path! Stop."
+            end
+            path_str =
+                string.format("Path %3d: %-30s Total (%d steps): %7.2f", path_count, path_str, depth, current_total)
+            DebugPrint(path_str)
+            if current_total < best_total then
+                best_total = current_total
+                best_target = current_path[1]
+                best_path_str = path_str
+            end
+
+            return
+        end
+
+        local candidates = {}
+        for _, t in ipairs(targets) do
+            if not visited[t] then
+                local distance
+                if current_target == nil then
+                    distance = t.distance
+                else
+                    distance = pairwise_distances[current_target.GUID][t.GUID]
+                    if not distance then
+                        distance = current_target:GetPosition():DistSq(t:GetPosition())
+                        pairwise_distances[current_target.GUID][t.GUID] = distance
+                        pairwise_distances[t.GUID][current_target.GUID] = distance
+                    end
+                end
+                table.insert(candidates, {target = t, distance = distance})
+                if distance < 1.1 then
+                    -- This target is right under my feet, stop adding others
+                    break
+                end
+            end
+        end
+
+        -- Sort by distance
+        table.sort(
+            candidates,
+            function(a, b)
+                return a.distance < b.distance
+            end
+        )
+
+        local top_closest = {}
+        for i = 1, math.min(candidate_num, #candidates) do
+            -- Prune candidates significantly farther than the closest one (sqrt(3) times threshold)
+            if i > 1 and candidates[i].distance > candidates[1].distance * 4 then
+                -- Stop including candidates beyond this point
+                break
+            end
+
+            table.insert(top_closest, candidates[i])
+
+            -- Prioritize immediate neighbors: if a target is within a close range,
+            -- treat it as the only viable candidate (avoids overcomplicating paths)
+            if candidates[i].distance < neighbor_range then
+                -- Early exit for nearby targets
+                break
+            end
+        end
+
+        if current_target == nil and #top_closest == 1 then
+            -- Early termination for single candidate at initial position
+            depth = math.min(max_depth, #targets)
+        else
+            depth = depth + 1
+        end
+
+        for _, c in ipairs(top_closest) do
+            local candidate = c.target
+            local dist = c.distance
+
+            visited[candidate] = true
+            table.insert(current_path, candidate)
+
+            generatePaths(candidate, targets, visited, current_path, current_total + dist, depth)
+
+            table.remove(current_path)
+            visited[candidate] = nil
+
+            if current_total + dist >= best_total or path_count == 500 then
+                -- Farther targets are 100% bad path - Early termination
+                break
+            end
+        end
+    end
+
+    DebugPrint("Generate and evaluate all paths:")
+
+    generatePaths(nil, targets, {}, {}, 0, 0)
+
+    DebugPrint(string.format("Total: %d paths.", path_count), "Optimal Path:", best_path_str)
+    return best_target
+end
+
 function ActionQueuer:GetClosestTarget(active_item)
     DebugPrint("-------------------------------------")
     DebugPrint("GetClosestTarget")
-    local target
+    local targets = {}
     local player_pos = self.inst:GetPosition()
     local repeat_flag = false
     local act
@@ -2719,22 +2892,28 @@ function ActionQueuer:GetClosestTarget(active_item)
     -- if locomotor:GetSpeedMultiplier() < 2.35 then
     -- end
 
+    -- Precompute distances for ALL entities
+    for _, ent in ipairs(self.selected_ents_sortable) do
+        ent.distance = player_pos:DistSq(ent:GetPosition())
+    end
+
     -- Sort selected entities bases on distance (farthest first)
     table.sort(
         self.selected_ents_sortable,
         function(a, b)
-            return player_pos:DistSq(a:GetPosition()) > player_pos:DistSq(b:GetPosition())
+            return a.distance > b.distance
         end
     )
 
     for _, ent in pairs(self.selected_ents_sortable) do
-        DebugPrint("Ent:", tostring(ent), "distance:", player_pos:DistSq(ent:GetPosition()))
+        DebugPrint("Ent:", tostring(ent), "distance:", ent.distance)
     end
 
     -- In endless mode, repeat until we got a target, or until all targets are deselected
     repeat
         -- From nearest to farthest
         -- Iterating from the last element to the first to avoid the issue of shifting indices
+        local state = {targets, is_active_item_changed = false}
         for i = #self.selected_ents_sortable, 1, -1 do
             local ent = self.selected_ents_sortable[i]
             if IsValidEntity(ent) then
@@ -2749,7 +2928,7 @@ function ActionQueuer:GetClosestTarget(active_item)
                     if ent:HasTag("ready") then
                         -- if this well is ready to receive bucket
                         -- then make sure we're holding a bucket
-                        if self:TakeBucket() then
+                        if self:TakeBucket(state) then
                             DebugPrint("Now we're holding a bucket")
                         else
                             -- If we don't have any bucket left
@@ -2871,24 +3050,38 @@ function ActionQueuer:GetClosestTarget(active_item)
                     end
                 end
 
-                if not skip_ent then
-                    if self.endless_deploy then
-                        -- In an endless queue, skip targets that can't accept any action at this time
-                        act = self:GetAction(ent, rightclick, ent:GetPosition())
-                        if not (act and act:IsValid()) then
-                            skip_ent = true
-                        end
+                if not skip_ent and self.endless_deploy then
+                    -- In an endless queue, skip targets that can't accept any action at this time
+                    act = self:GetAction(ent, rightclick, ent:GetPosition())
+                    if act and act:IsValid() then
+                        ent.act = act
                     else
-                        -- While not in endless queue
-                    end
-
-                    if not skip_ent then
-                        -- Found closest target with valid action, break loop
-                        target = ent
-                        break
+                        skip_ent = true
                     end
                 end
-                DebugPrint("Skip:", tostring(ent))
+
+                if not skip_ent then
+                    if
+                        TUNING.TARGET_SELECTION == "optimal" and #targets > 0 and
+                            ent.distance > targets[#targets].distance * 16
+                     then
+                        -- Does not consider targets too far away
+                        break
+                    end
+
+                    table.insert(targets, ent)
+                    DebugPrint("Added to targets list:", tostring(ent), string.format("(%s)", #targets))
+
+                    if TUNING.TARGET_SELECTION == "optimal" and not state.is_active_item_changed and #targets < 15 then
+                        -- Continue till the end of seletion list to get all valid targets
+                        -- If active changed, return the closed target
+                    else
+                        -- Found the closest target with valid action
+                        break
+                    end
+                else
+                    DebugPrint("Skip:", tostring(ent))
+                end
             else
                 DebugPrint("Not valid entity")
                 self:DeselectEntity(ent)
@@ -2896,11 +3089,19 @@ function ActionQueuer:GetClosestTarget(active_item)
         end
 
         -- In endless mode, repeat until got a target, or until all targets are deselected
-        if not target and #self.selected_ents_sortable > 0 and self.endless_deploy then
+        if #targets == 0 and #self.selected_ents_sortable > 0 and self.endless_deploy then
             -- Re-hold the active item if it's somehow not on the mouse
+            -- 250501 VanCa: Prevent endless take>store>take>store loop
             if active_item and not self:GetActiveItem() then
-                DebugPrint("Try to get new active item")
-                active_item = self:GetNewActiveItem(active_item.prefab) or active_item
+                DebugPrint("Try to get new active item~")
+                active_item =
+                    self:GetNewActiveItem(
+                    active_item.prefab,
+                    nil,
+                    function(item, cont, slot)
+                        return not table.contains(self.selected_ents_sortable, cont)
+                    end
+                ) or active_item
             end
             -- Set repeat
             repeat_flag = true
@@ -2911,6 +3112,13 @@ function ActionQueuer:GetClosestTarget(active_item)
         end
     until not repeat_flag
 
+    local optimal_target = getOptimalTarget(targets, player_pos, nil, nil, 15)
+    if optimal_target then
+        act = optimal_target.act
+        -- Update in case manual changed active item
+        active_item = self:GetActiveItem()
+    end
+
     -- In recursion mode, find nearby targets before declaring an action on an entity
     DebugPrint("drag_click_selected_flag:", self.drag_click_selected_flag)
     DebugPrint("double_click_flag:", self.double_click_flag)
@@ -2918,25 +3126,25 @@ function ActionQueuer:GetClosestTarget(active_item)
     if self.double_click_flag and #self.selected_ents_sortable > 0 and self.endless_deploy then
         -- Won't find nearby targets when repeating an action on a target
         -- (ex: choping a tree)
-        if not self.last_target_ent or self.last_target_ent ~= target then
-            self.last_target_ent = target
+        if not self.last_target_ent or self.last_target_ent ~= optimal_target then
+            self.last_target_ent = optimal_target
             DebugPrint("Selecting nearby targets recursively")
-            target.action = act.action
+            optimal_target.action = act.action
 
             local total_selected_ents = #self.selected_ents_sortable
             DebugPrint("total_selected_ents:", total_selected_ents)
-            self:DoubleClick(self.selected_ents[target], target)
+            self:DoubleClick(self.selected_ents[optimal_target], optimal_target)
             DebugPrint("#self.selected_ents_sortable:", #self.selected_ents_sortable)
             -- If there is a change in selected ents, find clostest target again
             if #self.selected_ents_sortable ~= total_selected_ents then
                 DebugPrint("Selected new Entities, find closest target again")
-                target, active_item, act = self:GetClosestTarget(active_item)
+                optimal_target, active_item, act = self:GetClosestTarget(active_item)
             end
         end
     end
 
-    DebugPrint("Closest target:", tostring(target))
-    return target, active_item, act
+    DebugPrint("Closest/Optimal target:", tostring(optimal_target))
+    return optimal_target, active_item, act
 end
 
 function ActionQueuer:WaitToolReEquip()
@@ -2989,7 +3197,7 @@ function ActionQueuer:ApplyToSelection()
         function()
             self.inst:ClearBufferedAction()
             local active_item = self:GetActiveItem()
-            DebugPrint("active_item:", active_item)
+            DebugPrint("active_item:", tostring(active_item))
             while self.inst:IsValid() do
                 DebugPrint("self.inst is Valid")
                 -- Update active_item in case we manually picked a new active item when stuck in finding the closest target
@@ -3033,7 +3241,7 @@ function ActionQueuer:ApplyToSelection()
                             if not act or act.action ~= current_action then
                                 DebugPrint("no action to perform")
                                 if active_item then
-                                    DebugPrint("active_item:", active_item)
+                                    DebugPrint("active_item:", tostring(active_item))
                                     if noworkdelay then
                                         DebugPrint("No delay work - sleep")
                                         Sleep(self.action_delay)
@@ -3055,7 +3263,15 @@ function ActionQueuer:ApplyToSelection()
                                                 end
                                             ) or active_item
                                         else
-                                            active_item = self:GetNewActiveItem(active_item.prefab) or active_item
+                                            -- 250501 VanCa: Prevent endless take>store>take>store loop
+                                            active_item =
+                                                self:GetNewActiveItem(
+                                                active_item.prefab,
+                                                nil,
+                                                function(_, cont)
+                                                    return cont ~= target
+                                                end
+                                            ) or active_item
                                         end
                                         -- Sleep(self.action_delay)
                                         act = self:GetAction(target, rightclick, pos)
@@ -3103,7 +3319,15 @@ function ActionQueuer:ApplyToSelection()
                          then
                             -- 250415 VanCa: This line run after all watering can have been filled and the pond has been deselected
                             -- so no need to pick up new watering can in this case
-                            active_item = self:GetNewActiveItem(active_item.prefab) or active_item
+                            -- 250501 VanCa: Prevent endless take>store>take>store loop
+                            active_item =
+                                self:GetNewActiveItem(
+                                active_item.prefab,
+                                nil,
+                                function(_, cont)
+                                    return cont ~= target
+                                end
+                            ) or active_item
                         end
                     elseif tool_action then
                         DebugPrint("tool_action. WaitToolReEquip")

@@ -117,6 +117,9 @@ local MESSAGES = LANG_MESSAGES[lang] or LANG_MESSAGES.en
 TUNING.STOP_WATERING_AT = GetModConfigData("stop_watering_at")
 TUNING.STOP_FERTILIZING_AT = GetModConfigData("stop_fertilizing_at")
 
+-- 250427 VanCa: Add optimal target selection.
+TUNING.TARGET_SELECTION = GetModConfigData("target_seletion")
+
 local SpawnPrefab = _G.SpawnPrefab
 local TheInput = _G.TheInput
 local unpack = _G.unpack

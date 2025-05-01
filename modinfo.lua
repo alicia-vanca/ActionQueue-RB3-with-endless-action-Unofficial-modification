@@ -61,6 +61,18 @@ F5を押して無限配置を有効化、またはMOD設定でデフォルトを
         },
         ACTION_QUEUE_KEY = {"ActionQueue key", zh = "行动队列键", zht = "行動佇列鍵", ja = "アクションキューキー"},
         ALWAYS_CLEAR_QUEUE = {"Always clear queue", zh = "总是清除队列", zht = "總是清除佇列", ja = "常にキューをクリア"},
+        TARGET_SELECTION = {
+            "Next target selection",
+            zh = "下一个目标选择",
+            zht = "下一個目標選擇",
+            ja = "次のターゲットの選択",
+            DESC = {
+                "Closest: Always move to the closest target\n[EXPERIMENTAL] Optimal: Balance between closest and minimize the total travel distance",
+                zh = "最近: 始终移动到最近的目标\n[实验性] 最优: 在最近距离和最小化总移动距离之间取得平衡",
+                zht = "最近: 始終移動到最近的目標\n[實驗性] 最優: 在最近距離和最小化總移動距離之間取得平衡",
+                ja = "最寄り: 常に最も近いターゲットに移動する\n[実験的] 最適: 最寄りの優先と総移動距離の最小化のバランスを取る"
+            }
+        },
         SELECTION_COLOR = {"Selection color", zh = "选择颜色", zht = "選擇顏色", ja = "選択色"},
         HIGHLIGHT_OPACITY = {
             "Selection highlight opacity",
@@ -182,7 +194,10 @@ F5を押して無限配置を有効化、またはMOD設定でデフォルトを
         -- Grid options
         GRID_2X2 = {"2x2", zh = "2x2", zht = "2x2", ja = "2x2"},
         GRID_3X3 = {"3x3", zh = "3x3", zht = "3x3", ja = "3x3"},
-        GRID_4X4 = {"4x4", zh = "4x4", zht = "4x4", ja = "4x4"}
+        GRID_4X4 = {"4x4", zh = "4x4", zht = "4x4", ja = "4x4"},
+        -- Next target selection options
+        CLOSEST = {"Closest", zh = "最近", zht = "最近", ja = "最寄り"},
+        OPTIMAL = {"Optimal", zh = "最优", zht = "最優", ja = "最適"}
     },
     COLORS = {
         WHITE = {"White", zh = "白色", zht = "白色", ja = "白"},
@@ -200,7 +215,7 @@ F5を押して無限配置を有効化、またはMOD設定でデフォルトを
 
 -- Mod metadata
 author = "simplex (Original Author)"
-version = "2.9.20"
+version = "3.1.01"
 name = "ActionQueue RB3 - with endless action v" .. version
 folder_name = folder_name or "action queue"
 if not folder_name:find("workshop-") then
@@ -299,6 +314,12 @@ local stop_fertilizing_options = {
     {description = "100%", data = 4}
 }
 
+-- 250427 VanCa: Logic when select the next target
+local target_seletion_options = {
+    {description = ChooseTranslationTable(STRINGS_AQ.CONFIG.CLOSEST), data = "closest"},
+    {description = ChooseTranslationTable(STRINGS_AQ.CONFIG.OPTIMAL), data = "optimal"}
+}
+
 local boolean = {
     {description = ChooseTranslationTable(STRINGS_AQ.CONFIG.YES), data = true},
     {description = ChooseTranslationTable(STRINGS_AQ.CONFIG.NO), data = false}
@@ -367,6 +388,14 @@ configuration_options = {
         label = ChooseTranslationTable(STRINGS_AQ.CONFIG.ALWAYS_CLEAR_QUEUE),
         options = boolean,
         default = true
+    },
+    {
+        -- 250427 VanCa: Add optimal target selection
+        name = "target_seletion",
+        label = ChooseTranslationTable(STRINGS_AQ.CONFIG.TARGET_SELECTION),
+        hover = ChooseTranslationTable(STRINGS_AQ.CONFIG.TARGET_SELECTION.DESC),
+        options = target_seletion_options,
+        default = "closest"
     },
     {
         name = "selection_color",
