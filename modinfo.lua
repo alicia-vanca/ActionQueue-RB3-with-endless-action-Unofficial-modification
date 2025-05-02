@@ -101,9 +101,9 @@ F5を押して無限配置を有効化、またはMOD設定でデフォルトを
         DOUBLE_CLICK_SPEED = {"Double click speed", zh = "双击速度", zht = "雙擊速度", ja = "ダブルクリック速度"},
         DOUBLE_CLICK_RANGE = {"Double click range", zh = "双击范围", zht = "雙擊範圍", ja = "ダブルクリック範囲"},
         -- Turf grid settings
-        TURF_GRID_KEY = {"Turf grid toggle key", zh = "草皮网格切换键", zht = "草皮網格切換鍵", ja = "ターフグリッド切替キー"},
-        TURF_GRID_RADIUS = {"Turf grid radius", zh = "草皮网格半径", zht = "草皮網格半徑", ja = "ターフグリッド半径"},
-        TURF_GRID_COLOR = {"Turf grid color", zh = "草皮网格颜色", zht = "草皮網格顏色", ja = "ターフグリッド色"},
+        TURF_GRID_KEY = {"Turf grid toggle key", zh = "地皮网格切换键", zht = "地皮網格切換鍵", ja = "ターフグリッド切替キー"},
+        TURF_GRID_RADIUS = {"Turf grid radius", zh = "地皮网格半径", zht = "地皮網格半徑", ja = "ターフグリッド半径"},
+        TURF_GRID_COLOR = {"Turf grid color", zh = "地皮网格颜色", zht = "地皮網格顏色", ja = "ターフグリッド色"},
         DEPLOY_ON_GRID = {"Always deploy on grid", zh = "总是在网格上部署", zht = "總是在網格上部署", ja = "常にグリッド上に配置"},
         -- Hotkey settings
         AUTO_COLLECT_KEY = {"Auto-collect toggle key", zh = "自动收集切换键", zht = "自動收集切換鍵", ja = "自動収集切替キー"},
@@ -215,7 +215,7 @@ F5を押して無限配置を有効化、またはMOD設定でデフォルトを
 
 -- Mod metadata
 author = "simplex (Original Author)"
-version = "3.1.01"
+version = "3.1.02"
 name = "ActionQueue RB3 - with endless action v" .. version
 folder_name = folder_name or "action queue"
 if not folder_name:find("workshop-") then
