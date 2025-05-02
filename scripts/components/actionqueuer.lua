@@ -440,8 +440,7 @@ AddActionList(
     "OCEAN_TRAWLER_RAISE",
     "SCYTHE",
     "START_PUSHING",
-    "DRAW_FROM_DECK", -- 250415 VanCa: Added support for draw JIMBO cards from deck
-    "PICKUP" -- 250427 VanCa: Support pickup spider
+    "DRAW_FROM_DECK" -- 250415 VanCa: Added support for draw JIMBO cards from deck
 )
 
 -- 201218 null: added support for right click PICK while equipping plantregistryhat
@@ -548,6 +547,15 @@ AddAction(
             end
         end
         return true
+    end
+)
+
+-- 250427 cutglass: Support pickup spider
+AddAction(
+    "rightclick",
+    "PICKUP",
+    function(target)
+        return target:HasTag("spider")
     end
 )
 
@@ -1853,6 +1861,16 @@ function ActionQueuer:DoubleClick(rightclick, target)
                 end
             end
         end
+    elseif target.prefab:match("^singingshell_octave") then
+        -- 250502 VanCa: Select all singingshell_octave shells
+        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
+            if ent.prefab:match("^singingshell_octave") then
+                local act, rightclick_ = self:GetAction(ent, rightclick)
+                if act and act.action == target.action then
+                    self:SelectEntity(ent, rightclick_)
+                end
+            end
+        end
     else
         DebugPrint("Not a special target:", target.prefab)
         -- 210705 null: added support for other mods to add their own CherryPick conditions
@@ -3050,12 +3068,13 @@ function ActionQueuer:GetClosestTarget(active_item)
                     end
                 end
 
-                if not skip_ent and self.endless_deploy then
-                    -- In an endless queue, skip targets that can't accept any action at this time
+                if not skip_ent then
                     act = self:GetAction(ent, rightclick, ent:GetPosition())
                     if act and act:IsValid() then
                         ent.act = act
-                    else
+                        ent.active_item = self:GetActiveItem()
+                    elseif self.endless_deploy then
+                        -- In an endless queue, skip targets that can't accept any action at this time
                         skip_ent = true
                     end
                 end
@@ -3116,7 +3135,7 @@ function ActionQueuer:GetClosestTarget(active_item)
     if optimal_target then
         act = optimal_target.act
         -- Update in case manual changed active item
-        active_item = self:GetActiveItem()
+        active_item = optimal_target.active_item
     end
 
     -- In recursion mode, find nearby targets before declaring an action on an entity
