@@ -115,8 +115,20 @@ AddActionQueuerActionList = AddActionList
 RemoveActionQueuerActionList = RemoveActionList
 
 --[[allclick]]
-AddActionList("allclick", "CHOP", "NET", "EAT")
+AddActionList("allclick", "NET", "EAT")
 -- 201222 null: Moved "EAT" from "rightclick" to "allclick" list
+
+AddAction(
+    "allclick",
+    "CHOP",
+    function(target)
+        -- 250512 VanCa: Prevent chopping short palmcone tree
+        return not (target.prefab == "palmconetree" and
+            (target.AnimState:IsCurrentAnimation("idle_short") or
+                target.AnimState:IsCurrentAnimation("sway1_loop_short") or
+                target.AnimState:IsCurrentAnimation("sway2_loop_short")))
+    end
+)
 
 AddAction(
     "allclick",
@@ -410,6 +422,11 @@ AddAction(
     "leftclick",
     "RUMMAGE",
     function(target, self)
+        -- Skip detailed processing for compatibility with QuickAction for ActionQueue (2753482847)
+        if not self then
+            return true
+        end
+
         if target.prefab == "pandoraschest" or target.prefab == "chest_mimic" then
             -- Make sure selected_ents_client_memory[target] is not nil (check allowed action before select)
             self.selected_ents_client_memory[target] = self.selected_ents_client_memory[target] or {}
@@ -530,6 +547,11 @@ AddAction(
     "rightclick",
     "FILL",
     function(target, self)
+        -- Skip detailed processing for compatibility with QuickAction for ActionQueue (2753482847)
+        if not self then
+            return true
+        end
+
         local item_in_hand = self:GetEquippedItemInHand()
         if item_in_hand and (item_in_hand.prefab == "wateringcan" or item_in_hand.prefab == "premiumwateringcan") then
             if self:GetActiveItem() then
@@ -618,6 +640,11 @@ AddAction(
     "noworkdelay",
     "FILL",
     function(target, self)
+        -- Skip detailed processing for compatibility with QuickAction for ActionQueue (2753482847)
+        if not self then
+            return true
+        end
+
         local item_in_hand = self:GetEquippedItemInHand()
         if item_in_hand and (item_in_hand.prefab == "wateringcan" or item_in_hand.prefab == "premiumwateringcan") then
             return false
@@ -665,7 +692,8 @@ AddAction(
             target:HasTag("singingshell") or
             target:HasTag("archive_lockbox") or
             target:HasTag("simplebook") or
-            target:HasTag("donotautopick")) and
+            target:HasTag("donotautopick") or
+            target:HasTag("backpack")) and
             target:HasTag("_inventoryitem") and
             target.prefab ~= "amulet"
     end
@@ -1634,16 +1662,6 @@ function ActionQueuer:DoubleClick(rightclick, target)
         local AnimstatePick = target.AnimState:IsCurrentAnimation("idle3") and "idle3" or "idle4"
         for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
             if ent.prefab == "rock_avocado_bush" and ent.AnimState:IsCurrentAnimation(AnimstatePick) then
-                self:SelectEntity(ent, rightclick)
-            end
-        end
-    elseif
-        target.prefab == "rock_avocado_bush" and target.action == ACTIONS.FERTILIZE and
-            target.AnimState:IsCurrentAnimation("dead1")
-     then
-        -- 250310 VanCa: If fertilize dead Rock avocado, only select nearby dead Rock avocados.
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if ent.prefab == "rock_avocado_bush" and ent.AnimState:IsCurrentAnimation("dead1") then
                 self:SelectEntity(ent, rightclick)
             end
         end
