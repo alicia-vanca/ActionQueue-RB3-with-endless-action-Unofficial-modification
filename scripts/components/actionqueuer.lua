@@ -66,6 +66,15 @@ local mod_cherrypick_fns = {} -- This will be a list of funtions from other mods
 
 local DebugPrint = _G.ActionQueue.DebugPrint
 
+-- 250522 VanCa: Added GetAnimation
+function GetAnimation(ent)
+    if ent == nil then
+        return
+    end
+    local a, b, c, d, e, f = ent.AnimState:GetHistoryData()
+    return b
+end
+
 local function AddAction(category, action, testfn)
     DebugPrint("-------------------------------------")
     DebugPrint("AddAction: category:", category, "action:", action, "testfn:", testfn)
@@ -409,9 +418,32 @@ AddAction(
 AddAction(
     "leftclick",
     "ADDCOMPOSTABLE",
-    function(target)
-        if target.prefab == "compostingbin" then
-            return not target.AnimState:IsCurrentAnimation("working")
+    function(target, self)
+        -- Skip detailed processing for compatibility with QuickAction for ActionQueue (2753482847)
+        if not self then
+            return true
+        end
+
+        -- Always return true at first
+        if target.prefab == "compostingbin" and self.selected_ents_client_memory[target] then
+            local client_memory = self.selected_ents_client_memory[target]
+            if not client_memory.CheckNotFull then
+                client_memory.CheckNotFull =
+                    target:DoPeriodicTask(
+                    0.5,
+                    function()
+                        if self:IsSelectedEntity(target) then
+                            if not target.AnimState:IsCurrentAnimation("working") then
+                                client_memory.is_full = false
+                            end
+                        else
+                            client_memory.CheckNotFull:Cancel()
+                            client_memory.CheckNotFull = nil
+                        end
+                    end
+                )
+            end
+            return not client_memory.is_full
         end
         return true
     end
@@ -1206,6 +1238,47 @@ function ActionQueuer:Wait(action, target, rightclick)
             not self.inst.components.playercontroller:IsDoingOrWorking()
     end
     DebugPrint("Time waited:", GetTime() - current_time)
+
+    if action == ACTIONS.ADDCOMPOSTABLE and target.prefab == "compostingbin" then
+        local client_memory = self.selected_ents_client_memory[target]
+        if not client_memory.CheckFull then
+            local check_full_start_timer = GetTime()
+            local is_full = true
+            client_memory.CheckFull =
+                target:DoPeriodicTask(
+                0.1,
+                function()
+                    local player_anim = GetAnimation(ThePlayer)
+                    if
+                        is_full ~= nil and table.contains({"give", "give_pst"}, player_anim) and
+                            not client_memory.CheckUse
+                     then
+                        local check_use_start_timer = GetTime()
+                        client_memory.CheckUse =
+                            target:DoPeriodicTask(
+                            0.1,
+                            function()
+                                if not target.AnimState:IsCurrentAnimation("working") then
+                                    is_full = false
+                                end
+                                if (not is_full or GetTime() - check_use_start_timer > 0.4) and client_memory.CheckUse then
+                                    client_memory.is_full = is_full
+                                    is_full = nil
+                                    client_memory.CheckUse:Cancel()
+                                    client_memory.CheckUse = nil
+                                end
+                            end
+                        )
+                    end
+                    if (not is_full or GetTime() - check_full_start_timer > 0.4) and client_memory.CheckFull then
+                        client_memory.CheckFull:Cancel()
+                        client_memory.CheckFull = nil
+                        DebugPrint(check_full_start_timer, "end CheckFull")
+                    end
+                end
+            )
+        end
+    end
 end
 
 function ActionQueuer:GetAction(target, rightclick, pos, active_item, item_in_hand)
@@ -1968,8 +2041,6 @@ function ActionQueuer:CherryPick(rightclick)
         if ent.takeitem then
             DebugPrint("ent.takeitem:", ent.takeitem:value())
         end
-        DebugPrint("ent.components:", ent.components)
-        DebugPrint("ent.replica:", ent.replica)
         DebugPrint("DebugString:", ent:GetDebugString())
         if self.selected_ents[ent] ~= nil then
             -- Make manual deselect easier
