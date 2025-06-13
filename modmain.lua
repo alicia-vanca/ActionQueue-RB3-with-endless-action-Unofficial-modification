@@ -70,7 +70,28 @@ local DebugPrint = TUNING.ACTION_QUEUE_DEBUG_MODE and function(...)
         if arg.n > 1 then
             msg = msg .. "\n"
         end
-        print(msg)
+
+        if #msg > 3900 then
+            local chunks = {}
+            local remaining = msg
+            while #remaining > 3900 do
+                local chunk = remaining:sub(1, 3900)
+                local last_newline = chunk:find("\n[^\n]*$")
+                if last_newline then
+                    table.insert(chunks, chunk:sub(1, last_newline - 1))
+                    remaining = remaining:sub(last_newline)
+                else
+                    table.insert(chunks, chunk)
+                    remaining = remaining:sub(3901)
+                end
+            end
+            table.insert(chunks, remaining)
+            for _, chunk in ipairs(chunks) do
+                print(chunk)
+            end
+        else
+            print(msg)
+        end
     end or function()
     end
 _G.ActionQueue = {}
@@ -253,7 +274,7 @@ callback.craft_last_recipe_key = function()
 end
 
 local function ActionQueuerInit()
-    print("[ActionQueue] Adding ActionQueuer component")
+    DebugPrint("Adding ActionQueuer component")
     ThePlayer:AddComponent("actionqueuer")
     ActionQueuer = ThePlayer.components.actionqueuer
     ActionQueuer.double_click_speed = GetModConfigData("double_click_speed")
@@ -288,7 +309,7 @@ AddComponentPostInit(
         ActionQueuerInit()
 
         local PlayerControllerOnControl = self.OnControl
-        DebugPrint("PlayerControllerOnControl")
+        DebugPrint("PlayerControllerOnControl = self.OnControl")
         self.OnControl = function(self, control, down)
             local mouse_control = mouse_controls[control]
             if mouse_control ~= nil then
@@ -306,7 +327,11 @@ AddComponentPostInit(
                         return
                     end
                 else
-                    ActionQueuer:OnUp(mouse_control)
+                    if ActionQueuer:OnUp(mouse_control) == "build_with_vanilla_grid" then
+                        -- 250613 VanCa: Allow buiding with vanilla geometric (shift + single click)
+                        DebugPrint("build_with_vanilla_grid control:", control, "down: true")
+                        PlayerControllerOnControl(self, control, true)
+                    end
                 end
             end
             PlayerControllerOnControl(self, control, down)

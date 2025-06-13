@@ -96,14 +96,14 @@ local function AddAction(category, action, testfn)
         return
     end
     allowed_actions[category][action_] = testfn
-    DebugPrint("Successfully", modifier, action_.id, "action in", category, "category.")
+    -- DebugPrint("Successfully", modifier, action_.id, "action in", category, "category.")
 end
 
 local function AddActionList(category, ...)
     DebugPrint("-------------------------------------")
     DebugPrint("AddActionList: category:", category)
     for _, action in pairs({...}) do
-        DebugPrint("AddActionList: action:", action)
+        -- DebugPrint("AddActionList: action:", action)
         AddAction(category, action, true)
     end
 end
@@ -192,7 +192,8 @@ AddActionList(
     "GRAVEDIG", -- 250304 VanCa: Added support for Wendy's skill
     "FT_CUTFUNGI", -- 250410 VanCa: Added support for shaving Candle Tree in Fairy Tales mod
     "MYTH_YJP_GIVE", -- 250412 VanCa: Added support for reviving giant plant with Myth mod's bottle
-    "ADD_CARD_TO_DECK" -- 250415 VanCa: Added support for stack JIMBO cards
+    "ADD_CARD_TO_DECK", -- 250415 VanCa: Added support for stack JIMBO cards
+    "POUNCECAPTURE" -- 250613 VanCa: Added support for capturing Gestalt
 )
 
 -- 250320 VanCa: Prevent endless loop between 2 Catapults
@@ -332,7 +333,7 @@ AddAction(
             return true
         end
         local active_item = self:GetActiveItem()
-        if target:HasTag("chest") or active_item.prefab == "featherpencil" then
+        if target:HasTags({"chest", "structure"}) and active_item.prefab == "featherpencil" then
             -- 250319 VanCa: Exclude STORE chests to draw minisign with click & drag easily
             return false
         end
@@ -390,6 +391,9 @@ AddAction(
         elseif target.prefab == "gelblob_storage" then
             -- 241003 VanCa: prevent repeatedly giving item to gelblob_storage that already has another item.
             return not target.takeitem:value() or target.takeitem:value().prefab == self:GetActiveItem().prefab
+        elseif target.prefab == "rabbithole" then
+            -- 250613 VanCa: prevent giving nonsense things into rabbit hole
+            return self:GetActiveItem().prefab == "carrot"
         end
 
         return true
@@ -1031,7 +1035,7 @@ function ActionQueuer:GetSlotsFromAll(allowed_prefabs, tags_required, validate_f
             -- 241010 VanCa: Stop taking item from "cooker" type container
             -- 250428 VanCa: Allow taking item from frostpack (Casino host)
             if container and (container.type ~= "cooker" or container.inst.prefab == "frostpack") then
-                DebugPrint("[ " .. tostring(cont) .. " ]")
+                DebugPrint("[ " .. tostring(cont) .. " ]", container.type)
                 for slot, item in pairs(container:GetItems()) do
                     DebugPrint("slot:", slot, "item:", tostring(item))
                     check_and_add_result(cont, slot, item)
@@ -1327,8 +1331,13 @@ function ActionQueuer:GetAction(target, rightclick, pos, active_item, item_in_ha
             not rightclick and CheckAllowedActions("leftclick", act.action, target, self) or
                 CheckAllowedActions("allclick", act.action, target, self)
          then
-            DebugPrint("Allowed leftclick action:", act.action.id)
-            return act, false
+            -- 250613 VanCa: Prevent Take-Give loop with gelblob_storage in some case
+            local saved_act =
+                self.selected_ents_client_memory[target] and self.selected_ents_client_memory[target].saved_act
+            if saved_act and saved_act.action == act.action or not saved_act then
+                DebugPrint("Allowed leftclick action:", act.action.id)
+                return act, false
+            end
         end
     end
     DebugPrint("No allowed action for target:", tostring(target))
@@ -1345,6 +1354,12 @@ function ActionQueuer:SendAction(act, rightclick, target)
         return
     end
     local pos = act:GetActionPoint() or self.inst:GetPosition()
+
+    -- CONTROL_FORCE_STACK (8)  - 1
+    -- CONTROL_FORCE_TRADE (4)  - 0
+    -- CONTROL_FORCE_ATTACK (2) - 1
+    -- CONTROL_FORCE_INSPECT (1) - 0
+    -- controlmods == 10 == 1010 == FORCE_STACK + FORCE_ATTACK
     local controlmods
 
     -- 250320 VanCa: Those item won't work with controlmods
@@ -1589,7 +1604,7 @@ function ActionQueuer:SelectionBox(rightclick)
                     if not self:IsSelectedEntity(ent) and not previous_ents[ent] then
                         local act, rightclick_ = self:GetAction(ent, rightclick, pos)
                         if act then
-                            self:SelectEntity(ent, rightclick_)
+                            self:SelectEntity(ent, rightclick_, act)
                             if not self.double_click_flag then
                                 DebugPrint("SelectionBox > drag_click_selected_flag = true")
                                 self.drag_click_selected_flag = true
@@ -1851,7 +1866,7 @@ function ActionQueuer:DoubleClick(rightclick, target)
                 local act, rightclick_ = self:GetAction(ent, rightclick)
                 if act and act.action == target.action then
                     if ent.takeitem:value().prefab == target.takeitem:value().prefab then
-                        self:SelectEntity(ent, rightclick_)
+                        self:SelectEntity(ent, rightclick_, act)
                     end
                 end
             end
@@ -1974,7 +1989,7 @@ function ActionQueuer:DoubleClick(rightclick, target)
              then
                 local act, rightclick_ = self:GetAction(ent, rightclick)
                 if act and act.action == target.action then
-                    self:SelectEntity(ent, rightclick_)
+                    self:SelectEntity(ent, rightclick_, act)
                 end
             end
         end
@@ -2066,7 +2081,7 @@ function ActionQueuer:CherryPick(rightclick)
                     if ent.prefab == "nutrients_overlay" then
                         self:SelectFarmTile(ent, rightclick_)
                     else
-                        self:ToggleEntitySelection(ent, rightclick_)
+                        self:ToggleEntitySelection(ent, rightclick_, act)
                     end
 
                     -- -- Original CherryPick code
@@ -2194,11 +2209,10 @@ function ActionQueuer:OnUp(rightclick)
                     self.inst.replica.inventory:EquipActiveItem()
                 else
                     if active_item.replica.inventoryitem:IsDeployable(self.inst) then
-                        self:DeployToSelection(self.DeployActiveItem, GetDeploySpacing(active_item), active_item)
+                        return self:DeployToSelection(self.DeployActiveItem, GetDeploySpacing(active_item), active_item)
                     else
-                        self:DeployToSelection(self.DropActiveItem, GetDropSpacing(active_item), active_item)
+                        return self:DeployToSelection(self.DropActiveItem, GetDropSpacing(active_item), active_item)
                     end
-                    return
                 end
             end
             local equip_item = self:GetEquippedItemInHand()
@@ -2232,7 +2246,7 @@ function ActionQueuer:OnUp(rightclick)
             local skin = playercontroller.placer_recipe_skin
             local builder = self.inst.replica.builder
             local spacing = recipe.min_spacing > 2 and 4 or 2
-            self:DeployToSelection(
+            return self:DeployToSelection(
                 function(self, pos, item)
                     if not builder:IsBuildBuffered(recipe.name) then
                         if not builder:CanBuild(recipe.name) then
@@ -2256,7 +2270,8 @@ function ActionQueuer:DeployToSelection(deploy_fn, spacing, item)
     DebugPrint("-------------------------------------")
     DebugPrint("DeployToSelection: deploy_fn:", deploy_fn, "spacing:", spacing, "item:", item)
     if not self.TL then
-        return
+        DebugPrint("(build_with_vanilla_grid)")
+        return "build_with_vanilla_grid"
     end
 
     -- 210116 null: cases for snapping positions to farm grid (Tilling, Wormwood planting on soil tiles, etc)
@@ -2980,7 +2995,7 @@ end
 
 function ActionQueuer:GetClosestTarget(active_item)
     DebugPrint("-------------------------------------")
-    DebugPrint("GetClosestTarget")
+    DebugPrint("GetClosestTarget active_item:", tostring(active_item))
     local targets = {}
     local player_pos = self.inst:GetPosition()
     local repeat_flag = false
@@ -3028,7 +3043,7 @@ function ActionQueuer:GetClosestTarget(active_item)
                 local skip_ent = false
                 local rightclick = self.selected_ents[ent]
                 local active_item_right_now = self:GetActiveItem()
-                DebugPrint("Active item:", tostring(active_item_right_now))
+                DebugPrint("Active item right now:", tostring(active_item_right_now))
 
                 if ent.prefab == "well" and not self.selected_ents[ent] then
                     -- (Dehydrated) Well - left click
@@ -3207,7 +3222,7 @@ function ActionQueuer:GetClosestTarget(active_item)
                     active_item.prefab,
                     nil,
                     function(item, cont, slot)
-                        return not table.contains(self.selected_ents_sortable, cont)
+                        return not self.selected_ents_client_memory[cont]
                     end
                 ) or active_item
             end
@@ -3308,8 +3323,9 @@ function ActionQueuer:ApplyToSelection()
             DebugPrint("active_item:", tostring(active_item))
             while self.inst:IsValid() do
                 DebugPrint("self.inst is Valid")
+                local target, act
                 -- Update active_item in case we manually picked a new active item when stuck in finding the closest target
-                local target, active_item, act = self:GetClosestTarget(active_item)
+                target, active_item, act = self:GetClosestTarget(active_item)
                 if not target then
                     break
                 end
@@ -3595,7 +3611,7 @@ function ActionQueuer:IsSelectedEntity(ent)
     return self.selected_ents[ent] ~= nil
 end
 
-function ActionQueuer:SelectEntity(ent, rightclick)
+function ActionQueuer:SelectEntity(ent, rightclick, act)
     DebugPrint("-------------------------------------")
     DebugPrint("SelectEntity: ent:", tostring(ent), "rightclick:", rightclick)
     if self:IsSelectedEntity(ent) then
@@ -3605,6 +3621,11 @@ function ActionQueuer:SelectEntity(ent, rightclick)
     self.selected_ents[ent] = rightclick
     table.insert(self.selected_ents_sortable, ent)
     self.selected_ents_client_memory[ent] = {}
+
+    if ent.prefab == "gelblob_storage" then
+        self.selected_ents_client_memory[ent].saved_act = act
+    end
+
     if not ent.components.highlight then
         ent:AddComponent("highlight")
     end
@@ -3645,13 +3666,13 @@ function ActionQueuer:DeselectEntity(ent)
     end
 end
 
-function ActionQueuer:ToggleEntitySelection(ent, rightclick)
+function ActionQueuer:ToggleEntitySelection(ent, rightclick, act)
     DebugPrint("-------------------------------------")
     DebugPrint("ToggleEntitySelection: ent:", tostring(ent), "rightclick:", rightclick)
     if self:IsSelectedEntity(ent) then
         self:DeselectEntity(ent)
     else
-        self:SelectEntity(ent, rightclick)
+        self:SelectEntity(ent, rightclick, act)
     end
 end
 
