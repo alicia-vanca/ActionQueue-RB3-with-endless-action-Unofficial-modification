@@ -1977,6 +1977,26 @@ function ActionQueuer:DoubleClick(rightclick, target)
                 end
             end
         end
+    elseif target.prefab:match("^deer_antler") then
+        -- 250613 VanCa: Select all kinds of deer_antler
+        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
+            if ent.prefab:match("^deer_antler") then
+                local act, rightclick_ = self:GetAction(ent, rightclick)
+                if act and act.action == target.action then
+                    self:SelectEntity(ent, rightclick_)
+                end
+            end
+        end
+    elseif target.prefab == "blueprint" then
+        -- 250613 VanCa: Only pick up blueprints with the same name
+        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
+            if ent.prefab == target.prefab and ent.name == target.name then
+                local act, rightclick_ = self:GetAction(ent, rightclick)
+                if act and act.action == target.action then
+                    self:SelectEntity(ent, rightclick_)
+                end
+            end
+        end
     else
         DebugPrint("Not a special target:", target.prefab)
         -- 210705 null: added support for other mods to add their own CherryPick conditions
@@ -2024,12 +2044,12 @@ function ActionQueuer:CherryPick(rightclick)
     end
 
     local allEntitiesUnderMouse = TheInput:GetAllEntitiesUnderMouse()
+    local pos = TheInput:GetWorldPosition()
 
     activeItem = self:GetActiveItem()
     if activeItem then
         if activeItem:HasTag("bucket_empty") then
             -- (Dehydrated) Can't get any target entity when taking water from ocean, so create a dummy temporary one
-            local pos = TheInput:GetWorldPosition()
             DebugPrint("pos:", pos)
             local null_target = CreateEntity()
             null_target.prefab = "ocean_water_source"
@@ -2041,11 +2061,27 @@ function ActionQueuer:CherryPick(rightclick)
     end
 
     -- Add farm tiles to the Entities under mouse list (needed when Watering, fertilizing)
-    local pos = TheInput:GetWorldPosition()
     for _, ent in pairs(TheWorld.Map:GetEntitiesOnTileAtPoint(pos.x, pos.y, pos.z)) do
         if ent.prefab == "nutrients_overlay" then -- Look for tile's nutrients_overlay entity, that's a farm tile
             table.insert(allEntitiesUnderMouse, ent)
             break
+        end
+    end
+
+    -- 250613 VanCa: Make storing food into gelblob_storage easier
+    if activeItem and not rightclick then
+        for _, entity in ipairs(allEntitiesUnderMouse) do
+            if entity.prefab == "gelblob_storage" then
+                local pos = entity:GetPosition()
+                for _, ent in pairs(
+                    TheSim:FindEntities(pos.x, 0, pos.z, self.double_click_range, nil, unselectable_tags)
+                ) do
+                    if entity ~= ent and ent.prefab == "gelblob_storage" then
+                        table.insert(allEntitiesUnderMouse, ent)
+                    end
+                end
+                break
+            end
         end
     end
 
