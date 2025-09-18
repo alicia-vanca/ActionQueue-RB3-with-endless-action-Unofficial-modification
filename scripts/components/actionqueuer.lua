@@ -2007,6 +2007,14 @@ function ActionQueuer:DoubleClick(rightclick, target)
                 end
             end
         end
+    elseif target.action == ACTIONS.REMOVELUNARBUILDUP then
+        -- 250919 VanCa: Select all nearby prefab that has lunar hail builded-up
+        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
+            local act, rightclick_ = self:GetAction(ent, rightclick)
+            if act and act.action == target.action then
+                self:SelectEntity(ent, rightclick_)
+            end
+        end
     else
         DebugPrint("Not a special target:", target.prefab)
         -- 210705 null: added support for other mods to add their own CherryPick conditions
