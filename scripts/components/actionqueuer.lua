@@ -473,6 +473,16 @@ AddAction(
     end
 )
 
+-- 250919 VanCa: Added support for mining Luna Hail == Cutlass 3.2 + Fix a stuck on burn trees
+AddAction(
+    "leftclick",
+    "REMOVELUNARBUILDUP",
+    function(target)
+        -- Fix a stuck on burn trees
+        return not (target:HasTag("burnt") or target:HasTag("fire"))
+    end
+)
+
 --[[rightclick]]
 AddActionList(
     "rightclick",
