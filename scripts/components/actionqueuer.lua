@@ -473,6 +473,16 @@ AddAction(
     end
 )
 
+-- 250919 VanCa: Added support for mining Luna Hail == Cutlass 3.2 + Fix a stuck on burn trees
+AddAction(
+    "leftclick",
+    "REMOVELUNARBUILDUP",
+    function(target)
+        -- Fix a stuck on burn trees
+        return not (target:HasTag("burnt") or target:HasTag("fire"))
+    end
+)
+
 --[[rightclick]]
 AddActionList(
     "rightclick",
@@ -1995,6 +2005,14 @@ function ActionQueuer:DoubleClick(rightclick, target)
                 if act and act.action == target.action then
                     self:SelectEntity(ent, rightclick_)
                 end
+            end
+        end
+    elseif target.action == ACTIONS.REMOVELUNARBUILDUP then
+        -- 250919 VanCa: Select all nearby prefab that has lunar hail builded-up
+        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
+            local act, rightclick_ = self:GetAction(ent, rightclick)
+            if act and act.action == target.action then
+                self:SelectEntity(ent, rightclick_)
             end
         end
     else
