@@ -479,7 +479,7 @@ AddAction(
     "REMOVELUNARBUILDUP",
     function(target)
         -- Fix a stuck on burn trees
-        return not (target:HasTag("burnt") or target:HasTag("fire"))
+        return not (target:HasTag("burnt") or target:HasTag("fire") or target:HasTag("stump"))
     end
 )
 
@@ -3416,7 +3416,12 @@ function ActionQueuer:ApplyToSelection()
                         while IsValidEntity(target) and self.selected_ents[target] ~= nil do
                             DebugPrint("target is valid")
                             local act = self:GetAction(target, rightclick, pos)
-                            if not act or act.action ~= current_action then
+                            -- 250921 VanCa: Continue to auto dig up stump while chopping if it doesn't require changing tool (Werebeaver)
+                            if
+                                not act or
+                                    (act.action ~= current_action and
+                                        not (current_action == ACTIONS.CHOP and act.action == ACTIONS.DIG))
+                             then
                                 DebugPrint("no action to perform")
                                 if active_item then
                                     DebugPrint("active_item:", tostring(active_item))
@@ -3463,7 +3468,12 @@ function ActionQueuer:ApplyToSelection()
                                     break
                                 end
                             end
-                            if act.action ~= current_action then
+
+                            -- 250921 VanCa: Continue to auto dig up stump while chopping if it doesn't require changing tool (Werebeaver)
+                            if
+                                act.action ~= current_action and
+                                    not (current_action == ACTIONS.CHOP and act.action == ACTIONS.DIG)
+                             then
                                 DebugPrint("act.action ~= current_action")
                                 break
                             end
