@@ -663,7 +663,8 @@ AddActionList(
     "PICKUP",
     "LIGHT",
     "ERASE_PAPER", -- 250114 VanCa: Added ERASE_PAPER to noworkdelay list
-    "DRAW_FROM_DECK" -- 250114 VanCa
+    "DRAW_FROM_DECK", -- 250114 VanCa: Added
+    "REMOVELUNARBUILDUP" -- 250921 VanCa: Added
 )
 
 AddAction(
