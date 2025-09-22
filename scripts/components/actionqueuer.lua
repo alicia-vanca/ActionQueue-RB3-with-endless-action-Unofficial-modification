@@ -463,12 +463,13 @@ AddAction(
             return true
         end
 
-        if target.prefab == "pandoraschest" or target.prefab == "chest_mimic" then
+        if target.prefab == "pandoraschest" or target.prefab == "chest_mimic" or target.prefab == "meatrack" then
             -- Make sure selected_ents_client_memory[target] is not nil (check allowed action before select)
             self.selected_ents_client_memory[target] = self.selected_ents_client_memory[target] or {}
 
             return not self.selected_ents_client_memory[target].skip_this_target
         end
+
         return false
     end
 )
@@ -664,7 +665,8 @@ AddActionList(
     "LIGHT",
     "ERASE_PAPER", -- 250114 VanCa: Added ERASE_PAPER to noworkdelay list
     "DRAW_FROM_DECK", -- 250114 VanCa: Added
-    "REMOVELUNARBUILDUP" -- 250921 VanCa: Added
+    "REMOVELUNARBUILDUP", -- 250921 VanCa: Added
+    "STORE" -- 250922 VanCa: Added, hope it won't cause any issue
 )
 
 AddAction(
@@ -979,6 +981,116 @@ function ActionQueuer:GetContainer(ent)
     end
 end
 
+function ActionQueuer:GetOpenedContainers(cont_prefab, tags_required, validate_func)
+    DebugPrint("-------------------------------------")
+    DebugPrint(
+        "GetOpenedContainers: cont_prefab:",
+        cont_prefab,
+        "tags_required:",
+        tags_required,
+        "validate_func:",
+        validate_func
+    )
+
+    local result = {}
+    local invent = self.inst.replica.inventory
+    tags_required =
+        (type(tags_required) == "string" and {tags_required}) or (type(tags_required) == "table" and tags_required) or
+        nil
+
+    for container_inst, _ in pairs(invent:GetOpenContainers() or {}) do
+        if
+            (not cont_prefab or cont_prefab == container_inst.prefab) and
+                (not tags_required or container_inst:HasTags(tags_required)) and
+                (not validate_func or validate_func(container_inst))
+         then
+            table.insert(result, container_inst)
+        end
+    end
+    DebugPrint("result:", result)
+    return result
+end
+
+function ActionQueuer:GetOpenedContainer(cont_prefab, tags_required, validate_func)
+    return self:GetOpenedContainers(cont_prefab, tags_required, validate_func)[1]
+end
+
+function ActionQueuer:GetBackpack()
+    return self:GetOpenedContainer(nil, {"INLIMBO", "backpack"})
+end
+
+-- Get stacking quantity
+function ActionQueuer:GetStackSize(ent)
+    if ent and ent.replica and ent.replica.stackable then
+        return ent.replica.stackable:StackSize()
+    end
+    return 1
+end
+
+function ActionQueuer:GetMaxSize(ent)
+    if ent and ent.replica and ent.replica.stackable then
+        return ent.replica.stackable:MaxSize()
+    end
+    return 1
+end
+
+function ActionQueuer:IsValid(ent)
+    return type(ent) == "table" and ent.entity and ent:IsValid() and ent.Transform
+end
+
+-- reference: 呼吸
+function ActionQueuer:CanPutInItem(cont, item)
+    DebugPrint("-------------------------------------")
+    DebugPrint("CanPutInItem: cont:", tostring(cont), "item:", tostring(item))
+    local container = self:GetContainer(cont)
+    if container and self:IsValid(item) then
+        local numslots = container:GetNumSlots()
+        local prefab = item.prefab
+        local slot
+
+        if container:AcceptsStacks() then
+            for i = 1, numslots do
+                local item_slot = container:GetItemInSlot(i)
+                slot =
+                    item_slot and item_slot.prefab == prefab and item_slot.skinname == item.skinname and
+                    self:GetStackSize(item_slot) < self:GetMaxSize(item_slot) and
+                    i
+                if slot then
+                    DebugPrint("slot:", slot)
+                    return slot
+                end
+            end
+        end
+
+        for i = 1, numslots do
+            slot = not container:GetItemInSlot(i) and container:CanTakeItemInSlot(item, i) and i
+            if slot then
+                DebugPrint("slot:", slot)
+                return slot
+            end
+        end
+    end
+    DebugPrint("Can't put in item")
+end
+
+-- Transfer item
+-- reference: 呼吸
+function ActionQueuer:MoveItemFromAllOfSlot(slot, src_container, dest_container)
+    local invent = self.inst.replica.inventory
+    if invent then
+        local container = self:GetContainer(src_container)
+        if container then
+            container:MoveItemFromAllOfSlot(slot, dest_container)
+        end
+    else
+        if src_container == ThePlayer then
+            SendRPCToServer(RPC.MoveInvItemFromAllOfSlot, slot, dest_container)
+        else
+            SendRPCToServer(RPC.MoveItemFromAllOfSlot, slot, src_container, dest_container)
+        end
+    end
+end
+
 local order_all = {"container", "equip", "body", "backpack", "mouse"}
 -- Get the location of the item and its container. Actually, tags are legacy code [Items under the mouse will only be included if order == ‘mouse’]
 -- reference: 呼吸
@@ -1235,7 +1347,6 @@ function ActionQueuer:Wait(action, target, rightclick)
                     not IsValidEntity(target) and not (self.inst.sg and self.inst.sg:HasStateTag("moving")) and
                         not self.inst:HasTag("moving") or
                         self.inst:HasTag("idle")
-                        -- or not self.inst.components.playercontroller:IsDoingOrWorking()
                  then
                     break
                 end
@@ -1518,10 +1629,61 @@ function ActionQueuer:SendActionAndWait(act, rightclick, target)
         -- Non target action (ex: ??)
     end
 
-    self:SendAction(act, rightclick, target)
-    self:Wait(act.action, target, rightclick)
+    -- Don't rummage the meatrack if it's opening, cus doing so will close it instead
+    if
+        not (target.prefab == "meatrack" and act.action == ACTIONS.RUMMAGE and
+            self:GetOpenedContainer(
+                "meatrack",
+                nil,
+                function(cont)
+                    return cont == target
+                end
+            ))
+     then
+        self:SendAction(act, rightclick, target)
+        self:Wait(act.action, target, rightclick)
+    end
 
-    -- 250219 VanCa: Prevent once opened Ornate Chest from being added to the selected_list again
+    if
+        target.prefab == "meatrack" and (act.action == ACTIONS.RUMMAGE or act.action == ACTIONS.STORE) and
+            self:GetOpenedContainer(
+                "meatrack",
+                nil,
+                function(cont)
+                    return cont == target
+                end
+            )
+     then
+        -- Take dried foods inside
+        local harvestable_data =
+            self:GetSlotsFromAll(
+            nil,
+            nil,
+            function(item, cont)
+                return cont == target and (string.sub(item.prefab, -6) == "_dried" or item.prefab == "spoiled_food")
+            end,
+            {"container"}
+        )
+        DebugPrint("List of dried/rotten foods:", harvestable_data)
+        local backpack = #harvestable_data > 0 and self:GetBackpack() or nil
+        for _, data in pairs(harvestable_data) do
+            local data_cont_replica = self:GetContainer(data.cont)
+            local dest_inst =
+                (self:CanPutInItem(ThePlayer, data.item) and ThePlayer) or
+                (self:CanPutInItem(backpack, data.item) and backpack)
+            if dest_inst then
+                repeat
+                    self:MoveItemFromAllOfSlot(data.slot, data.cont, dest_inst)
+                    -- Short wait and make sure the item in meat rack has been taken out
+                    Sleep(self.action_delay)
+                    local item_in_src_slot = data_cont_replica:GetItemInSlot(data.slot)
+                until not item_in_src_slot
+            end
+        end
+    end
+
+    -- 250219 VanCa: Prevent once opened OrnateChest from being added to the selected_list again
+    -- 250922 VanCa: MeatRack also need this
     if act.action == ACTIONS.RUMMAGE then
         self.selected_ents_client_memory[target].skip_this_target = true
     end
