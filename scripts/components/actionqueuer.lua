@@ -1631,7 +1631,7 @@ function ActionQueuer:SendActionAndWait(act, rightclick, target)
 
     -- Don't rummage the meatrack if it's opening, cus doing so will close it instead
     if
-        not (target.prefab == "meatrack" and act.action == ACTIONS.RUMMAGE and
+        not (target and target.prefab == "meatrack" and act.action == ACTIONS.RUMMAGE and
             self:GetOpenedContainer(
                 "meatrack",
                 nil,
@@ -1645,7 +1645,7 @@ function ActionQueuer:SendActionAndWait(act, rightclick, target)
     end
 
     if
-        target.prefab == "meatrack" and (act.action == ACTIONS.RUMMAGE or act.action == ACTIONS.STORE) and
+        target and target.prefab == "meatrack" and (act.action == ACTIONS.RUMMAGE or act.action == ACTIONS.STORE) and
             self:GetOpenedContainer(
                 "meatrack",
                 nil,
