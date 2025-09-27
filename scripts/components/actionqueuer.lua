@@ -1911,66 +1911,84 @@ function ActionQueuer:AddAdjacentFarmTiles(init_tile, rightclick, target_pos)
     )
 end
 
-function ActionQueuer:DoubleClick(rightclick, target)
+-- 250924 VanCa: Simplify DoubleClick checks
+function GetSameThingChecker(target, action)
     DebugPrint("-------------------------------------")
-    DebugPrint("DoubleClick: rightclick:", rightclick, "target:", tostring(target))
-    local pos = target.pos or target:GetPosition()
-    local x, y, z = pos:Get()
+    DebugPrint("GetSameThingChecker")
 
-    if target.prefab == "rock_avocado_bush" and (target.action == ACTIONS.PICK or target.action == ACTIONS.SCYTHE) then
+    if ACTIONS.REMOVELUNARBUILDUP == action then
+        -- 250919 VanCa: Select all nearby prefab (that has lunar hail builded-up)
+        return function()
+            return true
+        end
+    elseif target.prefab == "blueprint" then
+        -- 250613 VanCa: Only pick up blueprints with the same name
+        return function(ent)
+            return ent.prefab == "blueprint" and ent.name == target.name
+        end
+    elseif target.prefab:find("gargoyle_") then
+        -- 241030 VanCa: Select all kinds of  Suspicious Moonrock
+        return function(ent)
+            return ent.prefab and ent.prefab:find("gargoyle_")
+        end
+    elseif target.prefab:match("^chessjunk") then
+        -- 250414 VanCa: Select all types of Broken Clockworks
+        return function(ent)
+            return ent.prefab and ent.prefab:match("^chessjunk")
+        end
+    elseif target.prefab:match("^singingshell_octave") then
+        -- 250502 VanCa: Select all kinds of singingshell_octave shell
+        return function(ent)
+            return ent.prefab and ent.prefab:match("^singingshell_octave")
+        end
+    elseif target.prefab:match("^deer_antler") then
+        -- 250613 VanCa: Select all kinds of deer_antler
+        return function(ent)
+            return ent.prefab and ent.prefab:match("^deer_antler")
+        end
+    elseif target.prefab:match("^tree_rock") then
+        -- 250924 VanCa: Select all kinds of Boulderbough
+        return function(ent)
+            return ent.prefab and ent.prefab:match("^tree_rock")
+        end
+    elseif table.contains({ACTIONS.PICK, ACTIONS.SCYTHE}, action) and target.prefab == "rock_avocado_bush" then
         -- 210213 null: support for differentiating Stone Fruit Bushes in Pick (idle3) vs Crumble (idle4) state (blizstorm)
         -- 210315 null: support for isolating chopping of lvl 3 trees (blizstorm / Tranoze)
         local AnimstatePick = target.AnimState:IsCurrentAnimation("idle3") and "idle3" or "idle4"
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if ent.prefab == "rock_avocado_bush" and ent.AnimState:IsCurrentAnimation(AnimstatePick) then
-                self:SelectEntity(ent, rightclick)
-            end
+        return function(ent)
+            return ent.prefab == "rock_avocado_bush" and ent.AnimState:IsCurrentAnimation(AnimstatePick)
+        end
+    elseif table.contains({ACTIONS.DIG, ACTIONS.LIGHT}, action) and target:HasTags({"tree", "DIG_workable"}) then
+        -- 241028 VanCa: Do not distinguish between tree stumps when lighting/digging up roots
+        return function(ent)
+            return ent:HasTags({"tree", "DIG_workable"})
         end
     elseif
-        (target.action == ACTIONS.CHOP or target.action == ACTIONS.LIGHT) and
-            -- 250414 VanCa: When Chopping or Lighting
-            (target.prefab == "evergreen" or -- 210315 null: lvl 3 evergreen (blizstorm / Tranoze)
-                target.prefab == "deciduoustree" or -- 210315 null: lvl 3 deciduous (blizstorm)
-                target.prefab == "moon_tree" or -- 210322 null: lvl 3 lune trees
-                target.prefab == "twiggytree" or -- 210322 null: lvl 3 twiggy trees
-                target.prefab == "palmconetree" or -- 221010 cutlass: lvl 3 palmcone treesv
-                target.prefab == "evergreen_sparse") and -- 240930 VanCa: lvl 3 Lumpy Evergreen | Cutlass updated this in ver 2.8
+        table.contains({ACTIONS.CHOP, ACTIONS.LIGHT}, action) and
+            -- 250414 VanCa: Added support for Lighting trees
+            table.contains(
+                {
+                    "evergreen", -- 210315 null: lvl 3 evergreen (blizstorm / Tranoze)
+                    "deciduoustree", -- 210315 null: lvl 3 deciduous (blizstorm)
+                    "moon_tree", -- 210322 null: lvl 3 lune trees
+                    "twiggytree", -- 210322 null: lvl 3 twiggy trees
+                    "palmconetree", -- 221010 cutlass: lvl 3 palmcone treesv
+                    "evergreen_sparse" -- 240930 VanCa: lvl 3 Lumpy Evergreen | Cutlass updated this in ver 2.8
+                },
+                target.prefab
+            ) and
             (target.AnimState:IsCurrentAnimation("sway1_loop_tall") or
                 target.AnimState:IsCurrentAnimation("sway2_loop_tall"))
      then -- Only check for lvl3/tall trees
-        DebugPrint("Target is a lv3 tree:", target.prefab)
+        DebugPrint("Target is a lvl 3 tree:", target.prefab)
         -- 210322 null: support for isolating mining of lvl 3 marble trees
         -- Only check for lvl3/tall trees. Otherwise default to original CherryPick code.
         -- Double Click on Tall trees only CHOPs the Tall trees.
         -- Double Click on any other size tree CHOPs trees of all sizes (including Tall trees).
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if
-                ent.prefab == target.prefab and
-                    (ent.AnimState:IsCurrentAnimation("sway1_loop_tall") or
-                        ent.AnimState:IsCurrentAnimation("sway2_loop_tall"))
-             then
-                local act, rightclick_ = self:GetAction(ent, rightclick)
-                if act and act.action == target.action then
-                    self:SelectEntity(ent, rightclick_)
-                end
-            end
-        end
-    elseif target.prefab == "deciduoustree" and target:HasTag("monster") then
-        -- 241030 VanCa: Chopping/lighting Poison Birchnut Tree won't select all nearby trees
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if ent.prefab == "deciduoustree" and ent:HasTag("monster") then
-                self:SelectEntity(ent, rightclick)
-            end
-        end
-    elseif (target.action == ACTIONS.DIG or target.action == ACTIONS.LIGHT) and target:HasTags({"tree", "DIG_workable"}) then
-        -- 241028 VanCa: Do not distinguish between tree stumps when lighting/digging up roots
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if ent:HasTags({"tree", "DIG_workable"}) then
-                local act, rightclick_ = self:GetAction(ent, rightclick)
-                if act and act.action == target.action then
-                    self:SelectEntity(ent, rightclick_)
-                end
-            end
+        return function(ent)
+            return ent.prefab == target.prefab and
+                (ent.AnimState:IsCurrentAnimation("sway1_loop_tall") or
+                    ent.AnimState:IsCurrentAnimation("sway2_loop_tall"))
         end
     elseif
         target:HasTag("tree") and
@@ -1978,216 +1996,115 @@ function ActionQueuer:DoubleClick(rightclick, target)
                 target.AnimState:IsCurrentAnimation("sway2_loop_short"))
      then
         -- 241028 VanCa: Chopping old tree won't select all nearby trees anymore
-        -- for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-        -- if
-        -- ent.prefab == target.prefab and
-        -- (ent.AnimState:IsCurrentAnimation("idle_old") then
-        -- self:SelectEntity(ent, false)
-        -- end
-        -- end
+        return function()
+            return false
+        end
     elseif target:HasTags({"tree", "burnt"}) or target.prefab == "cave_banana_burnt" then
         DebugPrint("Target is a burned tree:", target.prefab)
         -- 241013 VanCa: Added support for chopping burned trees.
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if ent:HasTags({"tree", "burnt"}) or ent.prefab == "cave_banana_burnt" then
-                if
-                    not (ent.AnimState:IsCurrentAnimation("chop_burnt") or
-                        ent.AnimState:IsCurrentAnimation("chop_burnt_tall") or
-                        ent.AnimState:IsCurrentAnimation("chop_burnt_normal") or
-                        ent.AnimState:IsCurrentAnimation("chop_burnt_short"))
-                 then
-                    self:SelectEntity(ent, false)
-                end
-            end
+        return function(ent)
+            return (ent:HasTags({"tree", "burnt"}) or ent.prefab == "cave_banana_burnt") and
+                -- (this check to prevent selecting falling chopped burnt tree)
+                not (ent.AnimState:IsCurrentAnimation("chop_burnt") or
+                    ent.AnimState:IsCurrentAnimation("chop_burnt_tall") or
+                    ent.AnimState:IsCurrentAnimation("chop_burnt_normal") or
+                    ent.AnimState:IsCurrentAnimation("chop_burnt_short"))
+        end
+    elseif target.prefab == "deciduoustree" and target:HasTag("monster") then
+        -- 241030 VanCa: Chopping/lighting Poison Birchnut Tree won't select all nearby normal trees
+        return function(ent)
+            return ent.prefab == "deciduoustree" and ent:HasTag("monster")
         end
     elseif
-        target.prefab == "marbleshrub" and target.action == ACTIONS.MINE and
-            (target.AnimState:IsCurrentAnimation("idle_tall") or target.AnimState:IsCurrentAnimation("hit_tall"))
-     then -- Only check for lvl3/tall marble trees
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if
-                ent.prefab == target.prefab and
-                    (ent.AnimState:IsCurrentAnimation("idle_tall") or ent.AnimState:IsCurrentAnimation("hit_tall"))
-             then
-                self:SelectEntity(ent, false)
-            end
+        ACTIONS.MINE == target.action and target.prefab == "marbleshrub" and
+            (target.AnimState:IsCurrentAnimation("idle_tall") or target.AnimState:IsCurrentAnimation("hit_tall")) -- Only check for lvl3/tall marble trees
+     then
+        return function(ent)
+            return ent.prefab == target.prefab and
+                (ent.AnimState:IsCurrentAnimation("idle_tall") or ent.AnimState:IsCurrentAnimation("hit_tall"))
         end
-    elseif string.find(target.prefab, "gargoyle_") and target.action == ACTIONS.MINE then
-        -- 241030 VanCa: Mine all Suspicious Moonrock without distinction
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if ent.prefab and string.find(ent.prefab, "gargoyle_") then
-                self:SelectEntity(ent, false)
-            end
-        end
-    elseif target.prefab == "nutrients_overlay" then
-        -- 241012 Vanca: Select nearby farm tiles (wartering, fertilizing,..)
-        self:AddAdjacentFarmTiles(target, rightclick)
-    elseif (target.prefab == "pandoraschest" or target.prefab == "chest_mimic") and target.action == ACTIONS.RUMMAGE then
-        -- 250219 VanCa: Added support for RUMMAGE Ornate Chests
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if target.prefab == "pandoraschest" or target.prefab == "chest_mimic" then
-                local act, rightclick_ = self:GetAction(ent, rightclick)
-                if act and act.action == target.action then
-                    self:SelectEntity(ent, rightclick_)
-                end
-            end
-        end
-    elseif target.prefab == "gelblob_storage" and target.action == ACTIONS.TAKEITEM then
+    elseif ACTIONS.TAKEITEM == target.action and target.prefab == "gelblob_storage" then
         -- 250222 VanCa: only take identical items from nearby gelblob_storage(s)
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if ent.prefab == target.prefab then
-                local act, rightclick_ = self:GetAction(ent, rightclick)
-                if act and act.action == target.action then
-                    if ent.takeitem:value().prefab == target.takeitem:value().prefab then
-                        self:SelectEntity(ent, rightclick_, act)
-                    end
-                end
-            end
+        return function(ent)
+            return ent.prefab == target.prefab and ent.takeitem:value().prefab == target.takeitem:value().prefab
         end
     elseif
-        target.action == ACTIONS.DIG and target.prefab == "weed_forgetmelots" and
+        ACTIONS.DIG == target.action and target.prefab == "weed_forgetmelots" and
             target.AnimState:IsCurrentAnimation("crop_bloomed")
      then
         -- 250321 VanCa: Only select old forget-me-not when digging old forget-me-not
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if ent.prefab == "weed_forgetmelots" and ent.AnimState:IsCurrentAnimation("crop_bloomed") then
-                local act, rightclick_ = self:GetAction(ent, rightclick)
-                if act and act.action == target.action then
-                    self:SelectEntity(ent, rightclick_)
-                end
-            end
+        return function(ent)
+            return ent.prefab == "weed_forgetmelots" and ent.AnimState:IsCurrentAnimation("crop_bloomed")
         end
-    elseif (target.action == ACTIONS.DIG or target.action == ACTIONS.PICK) and target:HasTag("farm_plant_killjoy") then
+    elseif table.contains({ACTIONS.DIG, ACTIONS.PICK}, action) and target:HasTag("farm_plant_killjoy") then
         -- 250321 VanCa: Won't select normal plants when digging up rotten farm plants
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if ent.prefab == target.prefab and ent:HasTag("farm_plant_killjoy") then
-                local act, rightclick_ = self:GetAction(ent, rightclick)
-                if act and act.action == target.action then
-                    self:SelectEntity(ent, rightclick_)
-                end
-            end
+        return function(ent)
+            return ent.prefab == target.prefab and ent:HasTag("farm_plant_killjoy")
         end
     elseif
-        (target.action == ACTIONS.DIG or target.action == ACTIONS.PICK) and target:HasTags("farm_plant") and
+        table.contains({ACTIONS.DIG, ACTIONS.PICK}, action) and target:HasTags("farm_plant") and
             (target.AnimState:IsCurrentAnimation("crop_full") or target.AnimState:IsCurrentAnimation("crop_oversized"))
      then
         -- 250404 VanCa: Won't select unripe or rotten plants when digging/haverting farm plants
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if
-                ent.prefab == target.prefab and
-                    (ent.AnimState:IsCurrentAnimation("crop_full") or ent.AnimState:IsCurrentAnimation("crop_oversized"))
-             then
-                local act, rightclick_ = self:GetAction(ent, rightclick)
-                if act and act.action == target.action then
-                    self:SelectEntity(ent, rightclick_)
-                end
-            end
+        return function(ent)
+            return ent.prefab == target.prefab and
+                (ent.AnimState:IsCurrentAnimation("crop_full") or ent.AnimState:IsCurrentAnimation("crop_oversized"))
         end
     elseif
-        target.action == ACTIONS.DIG and target:HasTags("farm_plant") and
+        ACTIONS.DIG == target.action and target:HasTags("farm_plant") and
             (target.AnimState:IsCurrentAnimation("crop_seed") or target.AnimState:IsCurrentAnimation("crop_sprout") or
                 target.AnimState:IsCurrentAnimation("crop_small") or
                 target.AnimState:IsCurrentAnimation("crop_med"))
      then
         -- 250404 VanCa: Won't select grown plants when digging up growing farm plants
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if
-                ent.prefab == target.prefab and
-                    (ent.AnimState:IsCurrentAnimation("crop_seed") or ent.AnimState:IsCurrentAnimation("crop_sprout") or
-                        ent.AnimState:IsCurrentAnimation("crop_small") or
-                        ent.AnimState:IsCurrentAnimation("crop_med"))
-             then
-                local act, rightclick_ = self:GetAction(ent, rightclick)
-                if act and act.action == target.action then
-                    self:SelectEntity(ent, rightclick_)
-                end
-            end
+        return function(ent)
+            return ent.prefab == target.prefab and
+                (ent.AnimState:IsCurrentAnimation("crop_seed") or ent.AnimState:IsCurrentAnimation("crop_sprout") or
+                    ent.AnimState:IsCurrentAnimation("crop_small") or
+                    ent.AnimState:IsCurrentAnimation("crop_med"))
         end
-    elseif
-        target.action == ACTIONS.INTERACT_WITH and not target:HasTag("farm_plant_killjoy") and
-            target:HasTags("farm_plant")
-     then
+    elseif ACTIONS.INTERACT_WITH == action and not target:HasTag("farm_plant_killjoy") and target:HasTags("farm_plant") then
         -- 250408 VanCa: Won't distinguish between types when talking to plants - except farm_plant_killjoy
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if not ent:HasTag("farm_plant_killjoy") and ent:HasTags("farm_plant") then
-                local act, rightclick_ = self:GetAction(ent, rightclick)
-                if act and act.action == target.action then
-                    self:SelectEntity(ent, rightclick_)
-                end
-            end
+        return function(ent)
+            return not ent:HasTag("farm_plant_killjoy") and ent:HasTags("farm_plant")
         end
-    elseif table.contains({"chessjunk1", "chessjunk2", "chessjunk3"}, target.prefab) then
-        -- 250414 VanCa: Won't distinguish between Broken Clockworks types
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if table.contains({"chessjunk1", "chessjunk2", "chessjunk3"}, ent.prefab) then
-                local act, rightclick_ = self:GetAction(ent, rightclick)
-                if act and act.action == target.action then
-                    self:SelectEntity(ent, rightclick_)
-                end
-            end
+    elseif ACTIONS.RUMMAGE == action and table.contains({"pandoraschest", "chest_mimic"}, target.prefab) then
+        -- 250219 VanCa: Added support for RUMMAGE Ornate Chests
+        return function(ent)
+            return table.contains({"pandoraschest", "chest_mimic"}, ent.prefab)
         end
-    elseif target.action == ACTIONS.PICK and table.contains({"flower_cave", "flower_cave_double"}, target.prefab) then
+    elseif ACTIONS.PICK == action and table.contains({"flower_cave", "flower_cave_double"}, target.prefab) then
         -- 250414 VanCa: Select all Light Flowers that have equal or better quality.
         local allow_list = {"flower_cave_double", "flower_cave_triple"}
         if target.prefab == "flower_cave" then
             table.insert(allow_list, "flower_cave")
         end
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if table.contains(allow_list, ent.prefab) then
-                local act, rightclick_ = self:GetAction(ent, rightclick)
-                if act and act.action == target.action then
-                    self:SelectEntity(ent, rightclick_)
-                end
-            end
+        return function(ent)
+            return table.contains(allow_list, ent.prefab)
         end
-    elseif target.prefab:match("^singingshell_octave") then
-        -- 250502 VanCa: Select all singingshell_octave shells
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if ent.prefab:match("^singingshell_octave") then
-                local act, rightclick_ = self:GetAction(ent, rightclick)
-                if act and act.action == target.action then
-                    self:SelectEntity(ent, rightclick_)
-                end
-            end
-        end
-    elseif target.prefab:match("^deer_antler") then
-        -- 250613 VanCa: Select all kinds of deer_antler
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if ent.prefab:match("^deer_antler") then
-                local act, rightclick_ = self:GetAction(ent, rightclick)
-                if act and act.action == target.action then
-                    self:SelectEntity(ent, rightclick_)
-                end
-            end
-        end
-    elseif target.prefab == "blueprint" then
-        -- 250613 VanCa: Only pick up blueprints with the same name
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if ent.prefab == target.prefab and ent.name == target.name then
-                local act, rightclick_ = self:GetAction(ent, rightclick)
-                if act and act.action == target.action then
-                    self:SelectEntity(ent, rightclick_)
-                end
-            end
-        end
-    elseif target.action == ACTIONS.REMOVELUNARBUILDUP then
-        -- 250919 VanCa: Select all nearby prefab that has lunar hail builded-up
-        for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            local act, rightclick_ = self:GetAction(ent, rightclick)
-            if act and act.action == target.action then
-                self:SelectEntity(ent, rightclick_)
-            end
-        end
+    end
+
+    DebugPrint("Not a special target:", target.prefab)
+    return function(ent)
+        return ent.prefab == target.prefab
+    end
+end
+
+function ActionQueuer:DoubleClick(rightclick, target)
+    DebugPrint("-------------------------------------")
+    DebugPrint("DoubleClick: rightclick:", rightclick, "target:", tostring(target))
+
+    if target.prefab == "nutrients_overlay" then
+        -- 241012 Vanca: Select nearby farm tiles (wartering, fertilizing,..)
+        self:AddAdjacentFarmTiles(target, rightclick)
     else
-        DebugPrint("Not a special target:", target.prefab)
         -- 210705 null: added support for other mods to add their own CherryPick conditions
+        -- 250924 VanCa: Use helper function to check similar nearby entities
+        local checker = GetSameThingChecker(target, target.action)
+        local pos = target.pos or target:GetPosition()
+        local x, y, z = pos:Get()
         for _, ent in pairs(TheSim:FindEntities(x, 0, z, self.double_click_range, nil, unselectable_tags)) do
-            if
-                (ent.prefab == target.prefab or -- Original CherryPick condition
-                    self:CanModCherryPick(ent)) and -- 210705 null: Other mods' CherryPick conditions (if true, select the ent)
-                    IsValidEntity(ent) and
-                    not self:IsSelectedEntity(ent)
-             then
+            if not self:IsSelectedEntity(ent) and IsValidEntity(ent) and (checker(ent) or self:CanModCherryPick(ent)) then -- 210705 null: Other mods' CherryPick conditions (if true, select the ent)
                 local act, rightclick_ = self:GetAction(ent, rightclick)
                 if act and act.action == target.action then
                     self:SelectEntity(ent, rightclick_, act)
