@@ -215,7 +215,7 @@ F5を押して無限配置を有効化、またはMOD設定でデフォルトを
 
 -- Mod metadata
 author = "simplex (Original Author)"
-version = "3.2.05"
+version = "3.2.06"
 name = "ActionQueue RB3 - with endless action v" .. version
 folder_name = folder_name or "action queue"
 if not folder_name:find("workshop-") then
