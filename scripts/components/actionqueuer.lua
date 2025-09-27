@@ -2026,7 +2026,7 @@ function GetSameThingChecker(target, action)
     elseif ACTIONS.TAKEITEM == target.action and target.prefab == "gelblob_storage" then
         -- 250222 VanCa: only take identical items from nearby gelblob_storage(s)
         return function(ent)
-            return ent.prefab == target.prefab and ent.takeitem:value().prefab == target.takeitem:value().prefab
+            return ent.prefab == target.prefab and ent.takeitem and ent.takeitem:value().prefab == target.takeitem:value().prefab
         end
     elseif
         ACTIONS.DIG == target.action and target.prefab == "weed_forgetmelots" and
