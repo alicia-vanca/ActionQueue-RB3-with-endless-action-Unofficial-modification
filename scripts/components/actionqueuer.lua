@@ -351,7 +351,8 @@ AddAction(
                     -- Appropriate ingredient
 
                     -- If the target container is opening, remember what's in the specific slot
-                    if container._isopen then
+                    -- 260322 Vanca: Change container._isopen to container:IsOpenedBy(ThePlayer)
+                    if container:IsOpenedBy(ThePlayer) then
                         self.selected_ents_client_memory[target].item_in_specific_slot = container:GetItemInSlot(slot)
                     end
                     -- If specific slot is empty then return true
@@ -363,7 +364,7 @@ AddAction(
             else
                 -- (kettles / breweries / crock pots)
                 -- If the target container is opening, remember whether it's full or not
-                if container._isopen then
+                if container:IsOpenedBy(ThePlayer) then
                     self.selected_ents_client_memory[target].is_full = container:IsFull()
                 end
                 -- Prevent STORE action when giving inappropriate thing or when it is full
@@ -665,8 +666,9 @@ AddActionList(
     "LIGHT",
     "ERASE_PAPER", -- 250114 VanCa: Added ERASE_PAPER to noworkdelay list
     "DRAW_FROM_DECK", -- 250114 VanCa: Added
-    "REMOVELUNARBUILDUP", -- 250921 VanCa: Added
-    "STORE" -- 250922 VanCa: Added, hope it won't cause any issue
+    "REMOVELUNARBUILDUP" -- 250921 VanCa: Added
+    --"STORE" -- 250922 VanCa: Added, hope it won't cause any issue
+    -- 260322 VanCa: Removed STORE, long wait prevents duplicate failed actions on invalid storage
 )
 
 AddAction(
@@ -711,7 +713,11 @@ AddAction(
 AddActionList("tools", "ATTACK", "CHOP", "DIG", "HAMMER", "MINE", "NET", "SCYTHE")
 
 --[[autocollect]]
-AddActionList("autocollect", "CHOP", "DIG", "HAMMER", "HARVEST", "MINE", "PICK", "PICKUP", "RESETMINE", "SCYTHE")
+if TUNING.ACTION_QUEUE_PICK_ACTION_TRIGGER_AUTO_COLLECT then
+    AddActionList("autocollect", "CHOP", "DIG", "HAMMER", "HARVEST", "MINE", "PICK", "PICKUP", "RESETMINE", "SCYTHE")
+else
+    AddActionList("autocollect", "CHOP", "DIG", "HAMMER", "HARVEST", "MINE", "RESETMINE", "SCYTHE")
+end
 AddAction(
     "autocollect",
     "GIVE",
@@ -784,7 +790,6 @@ local ActionQueuer =
         self.double_click_flag = false
         self.drag_click_selected_flag = false
         self.AddAction = AddAction
-        self.RemoveAction = AddAction
         self.AddActionList = AddActionList
         self.RemoveActionList = RemoveActionList
         DebugPrint("ActionQueuer initialize")
@@ -1077,7 +1082,7 @@ end
 -- reference: 呼吸
 function ActionQueuer:MoveItemFromAllOfSlot(slot, src_container, dest_container)
     local invent = self.inst.replica.inventory
-    if invent then
+    if invent and dest_container then
         local container = self:GetContainer(src_container)
         if container then
             container:MoveItemFromAllOfSlot(slot, dest_container)
@@ -1206,11 +1211,15 @@ end
 -- Pick up a certain item
 function ActionQueuer:TakeActiveItemFromAllOfSlot(cont, slot, item_data)
     local count = 0
-    while self:GetActiveItem() do
+    local active_item = self:GetActiveItem()
+    if active_item == item_data.item then
+        return active_item
+    end
+    while active_item do
         if count % 5 == 0 then
             self.inst.replica.inventory:ReturnActiveItem()
         else
-            -- Short wait
+            -- ReturnActiveItem every 5 Short wait
             Sleep(self.action_delay)
             DebugPrint("ReturnActiveItem short wait: ", count - math.floor(count / 5))
         end
@@ -1232,7 +1241,9 @@ function ActionQueuer:TakeActiveItemFromAllOfSlot(cont, slot, item_data)
                 DebugPrint("TakeActiveItem short wait: ", count - math.floor(count / 5))
             end
             count = count + 1
-        until not item_data or self:GetActiveItem() == item_data.item
+            active_item = self:GetActiveItem()
+        until active_item == item_data.item
+        return active_item
     end
 end
 
@@ -1252,7 +1263,10 @@ function ActionQueuer:GetNewActiveItem(allowed_prefabs, tags_required, validate_
         (type(allowed_prefabs) == "string" and allowed_prefabs ~= "" and {allowed_prefabs}) or
         (type(allowed_prefabs) == "table" and allowed_prefabs) or
         nil
-
+    if not order then
+        -- Also check the mouse. Prevent the situation where the required item already on the mouse
+        order = "mouse"
+    end
     local item_data = self:GetSlotFromAll(allowed_prefabs, tags_required, validate_func, order)
     if item_data then
         DebugPrint("item_data:", item_data)
@@ -1335,7 +1349,7 @@ end
 
 function ActionQueuer:Wait(action, target, rightclick)
     DebugPrint("-------------------------------------")
-    DebugPrint("Wait: action: ", tostring(action), "target: ", tostring(target), "rightclick: ", rightclick)
+    DebugPrint("Wait: action: ", action and action.id, "target: ", tostring(target), "rightclick: ", rightclick)
     local current_time = GetTime()
 
     if action and CheckAllowedActions("noworkdelay", action, target, self) then
@@ -1588,40 +1602,45 @@ function ActionQueuer:SendActionAndWait(act, rightclick, target)
              then
                 -- Save what we're giving to the bird, then put it back to inventory
                 -- To trigger HARVEST action
-                local active_item = self:GetActiveItem()
+                local active_item_giving_to_bird = self:GetActiveItem()
                 self.inst.replica.inventory:ReturnActiveItem()
 
                 DebugPrint("Trigger a HARVEST action to take out the bird")
-                act = BufferedAction(self.inst, nil, ACTIONS.HARVEST, nil, nil)
-                self:SendAction(act, false, target)
-                self:Wait(act.action, target)
-
-                while true do
+                local temp_act = BufferedAction(self.inst, nil, ACTIONS.HARVEST, nil, nil)
+                repeat
+                    self:SendAction(temp_act, false, target)
+                    self:Wait(temp_act.action, target)
                     DebugPrint("Take the bird from inventory")
-                    self:GetNewActiveItem(nil, "bird")
-                    DebugPrint("Put the bird back to the cage")
-                    act = self:GetAction(target, false)
-                    if act and act:IsValid() then
+                until self:GetNewActiveItem(nil, "bird")
+
+                DebugPrint("Put the bird back to the cage")
+                while true do
+                    temp_act = self:GetAction(target, false)
+                    if temp_act and temp_act:IsValid() then
                         -- (STORE action)
+                        repeat
+                            self:SendAction(temp_act, false, target)
+                            self:Wait(temp_act.action, target)
+                        until not self:GetActiveItem()
                         break
                     else
                         Sleep(self.work_delay)
                     end
                 end
-                self:SendAction(act, false, target)
-                self:Wait(act.action, target)
 
                 DebugPrint("Take back what we were giving to the bird")
-                self:GetNewActiveItem(active_item.prefab)
-
-                -- (GIVE action)
-                while true do
-                    act = self:GetAction(target, false)
-                    if not act or act.action.id ~= "GIVE" then
-                        self:Wait()
-                    else
-                        break
+                if self:GetNewActiveItem(active_item_giving_to_bird.prefab) then
+                    -- (GIVE action)
+                    while true do
+                        act = self:GetAction(target, false)
+                        if not act or act.action.id ~= "GIVE" then
+                            self:Wait()
+                        else
+                            break
+                        end
                     end
+                else
+                    -- When started waking the bird, the food dropped back into the icebox/chest
                 end
             end
         end
@@ -1630,54 +1649,34 @@ function ActionQueuer:SendActionAndWait(act, rightclick, target)
     end
 
     -- Don't rummage the meatrack if it's opening, cus doing so will close it instead
+    -- 260322 VanCa: Added support for meatrack_hermit_multi
     if
-        not (target and target.prefab == "meatrack" and act.action == ACTIONS.RUMMAGE and
-            self:GetOpenedContainer(
-                "meatrack",
-                nil,
-                function(cont)
-                    return cont == target
-                end
-            ))
+        not (target and (target.prefab == "meatrack" or target.prefab == "meatrack_hermit_multi") and
+            act.action == ACTIONS.RUMMAGE and
+            self:GetContainer(target) and
+            self:GetContainer(target):IsOpenedBy(ThePlayer))
      then
         self:SendAction(act, rightclick, target)
         self:Wait(act.action, target, rightclick)
     end
 
     if
-        target and target.prefab == "meatrack" and (act.action == ACTIONS.RUMMAGE or act.action == ACTIONS.STORE) and
-            self:GetOpenedContainer(
-                "meatrack",
-                nil,
-                function(cont)
-                    return cont == target
-                end
-            )
+        target and (target.prefab == "meatrack" or target.prefab == "meatrack_hermit_multi") and
+            (act.action == ACTIONS.RUMMAGE or act.action == ACTIONS.STORE)
      then
-        -- Take dried foods inside
-        local harvestable_data =
-            self:GetSlotsFromAll(
-            nil,
-            nil,
-            function(item, cont)
-                return cont == target and (string.sub(item.prefab, -6) == "_dried" or item.prefab == "spoiled_food")
-            end,
-            {"container"}
-        )
-        DebugPrint("List of dried/rotten foods:", harvestable_data)
-        local backpack = #harvestable_data > 0 and self:GetBackpack() or nil
-        for _, data in pairs(harvestable_data) do
-            local data_cont_replica = self:GetContainer(data.cont)
-            local dest_inst =
-                (self:CanPutInItem(ThePlayer, data.item) and ThePlayer) or
-                (self:CanPutInItem(backpack, data.item) and backpack)
-            if dest_inst then
-                repeat
-                    self:MoveItemFromAllOfSlot(data.slot, data.cont, dest_inst)
-                    -- Short wait and make sure the item in meat rack has been taken out
-                    Sleep(self.action_delay)
-                    local item_in_src_slot = data_cont_replica:GetItemInSlot(data.slot)
-                until not item_in_src_slot
+        -- Take dried foods out
+        local container = self:GetContainer(target)
+        if container and container:IsOpenedBy(ThePlayer) then
+            for i = 1, container:GetNumSlots() do
+                local item = container:GetItemInSlot(i)
+                if item and not item:HasTag("dryable") then
+                    repeat
+                        self:MoveItemFromAllOfSlot(i, target)
+                        -- Short wait and make sure the item in the meat rack has been taken out
+                        Sleep(self.action_delay)
+                        item = container:GetItemInSlot(i)
+                    until not item
+                end
             end
         end
     end
@@ -1777,10 +1776,24 @@ function ActionQueuer:SelectionBox(rightclick)
                     if not self:IsSelectedEntity(ent) and not previous_ents[ent] then
                         local act, rightclick_ = self:GetAction(ent, rightclick, pos)
                         if act then
-                            self:SelectEntity(ent, rightclick_, act)
-                            if not self.double_click_flag then
-                                DebugPrint("SelectionBox > drag_click_selected_flag = true")
-                                self.drag_click_selected_flag = true
+                            local banned_ents_from_rectangle_pick = {
+                                "flower",
+                                "flower_evil",
+                                "cave_fern",
+                                "succulent_plant",
+                                "flower_withered",
+                                "storage_robot",
+                                "winona_storage_robot"
+                            }
+                            if
+                                not (act.action.id == "PICK" and
+                                    table.contains(banned_ents_from_rectangle_pick, ent.prefab))
+                             then
+                                self:SelectEntity(ent, rightclick_, act)
+                                if not self.double_click_flag then
+                                    DebugPrint("SelectionBox > drag_click_selected_flag = true")
+                                    self.drag_click_selected_flag = true
+                                end
                             end
                         end
                     end
@@ -2017,8 +2030,8 @@ function GetSameThingChecker(target, action)
         end
     elseif
         ACTIONS.MINE == target.action and target.prefab == "marbleshrub" and
-            (target.AnimState:IsCurrentAnimation("idle_tall") or target.AnimState:IsCurrentAnimation("hit_tall")) -- Only check for lvl3/tall marble trees
-     then
+            (target.AnimState:IsCurrentAnimation("idle_tall") or target.AnimState:IsCurrentAnimation("hit_tall"))
+     then -- Only check for lvl3/tall marble trees
         return function(ent)
             return ent.prefab == target.prefab and
                 (ent.AnimState:IsCurrentAnimation("idle_tall") or ent.AnimState:IsCurrentAnimation("hit_tall"))
@@ -2026,7 +2039,8 @@ function GetSameThingChecker(target, action)
     elseif ACTIONS.TAKEITEM == target.action and target.prefab == "gelblob_storage" then
         -- 250222 VanCa: only take identical items from nearby gelblob_storage(s)
         return function(ent)
-            return ent.prefab == target.prefab and ent.takeitem and ent.takeitem:value().prefab == target.takeitem:value().prefab
+            return ent.prefab == target.prefab and ent.takeitem and
+                ent.takeitem:value().prefab == target.takeitem:value().prefab
         end
     elseif
         ACTIONS.DIG == target.action and target.prefab == "weed_forgetmelots" and

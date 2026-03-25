@@ -107,6 +107,12 @@ F5を押して無限配置を有効化、またはMOD設定でデフォルトを
         DEPLOY_ON_GRID = {"Always deploy on grid", zh = "总是在网格上部署", zht = "總是在網格上部署", ja = "常にグリッド上に配置"},
         -- Hotkey settings
         AUTO_COLLECT_KEY = {"Auto-collect toggle key", zh = "自动收集切换键", zht = "自動收集切換鍵", ja = "自動収集切替キー"},
+        PICK_ACTION_TRIGGER_AUTO_COLLECT = {
+            "PICK action trigger auto-collect",
+            zh = "“拾取”动作将触发自动收集",
+            zht = "“拾取”動作將觸發自動收集",
+            ja = "「拾う」で自動収集をトリガーする"
+        },
         ENABLE_AUTO_COLLECT = {
             "Enable auto-collect by default",
             zh = "默认启用自动收集",
@@ -215,7 +221,7 @@ F5を押して無限配置を有効化、またはMOD設定でデフォルトを
 
 -- Mod metadata
 author = "simplex (Original Author)"
-version = "3.2.07"
+version = "3.2.08"
 name = "ActionQueue RB3 - with endless action v" .. version
 folder_name = folder_name or "action queue"
 if not folder_name:find("workshop-") then
@@ -315,6 +321,7 @@ local stop_fertilizing_options = {
 }
 
 -- 250427 VanCa: Logic when select the next target
+-- Postponed function
 local target_seletion_options = {
     {description = ChooseTranslationTable(STRINGS_AQ.CONFIG.CLOSEST), data = "closest"},
     {description = ChooseTranslationTable(STRINGS_AQ.CONFIG.OPTIMAL), data = "optimal"}
@@ -334,7 +341,7 @@ local function nullBuildNumConfig(start_num, end_num, step, percent)
     local iterator = 1
     local suffix = percent and "%" or ""
 
-    local ostart_num, oend_num, ostep -- For storing original parameters if needed
+    local ostart_num, oend_num, ostep  -- For storing original parameters if needed
     if step > 0 and step < 1 then -- If step = float between 0 and 1 (IE, Double click speed)
         ostart_num, oend_num, ostep = start_num, end_num, step -- Store the original parameters
 
@@ -389,14 +396,15 @@ configuration_options = {
         options = boolean,
         default = true
     },
-    {
-        -- 250427 VanCa: Add optimal target selection
-        name = "target_seletion",
-        label = ChooseTranslationTable(STRINGS_AQ.CONFIG.TARGET_SELECTION),
-        hover = ChooseTranslationTable(STRINGS_AQ.CONFIG.TARGET_SELECTION.DESC),
-        options = target_seletion_options,
-        default = "closest"
-    },
+    -- {
+        -- -- 250427 VanCa: Add optimal target selection
+		-- -- Postponed function
+        -- name = "target_seletion",
+        -- label = ChooseTranslationTable(STRINGS_AQ.CONFIG.TARGET_SELECTION),
+        -- hover = ChooseTranslationTable(STRINGS_AQ.CONFIG.TARGET_SELECTION.DESC),
+        -- options = target_seletion_options,
+        -- default = "closest"
+    -- },
     {
         name = "selection_color",
         label = ChooseTranslationTable(STRINGS_AQ.CONFIG.SELECTION_COLOR),
@@ -459,6 +467,12 @@ configuration_options = {
         label = ChooseTranslationTable(STRINGS_AQ.CONFIG.AUTO_COLLECT_KEY),
         options = keys,
         default = "KEY_F4"
+    },
+    {
+        name = "pick_action_trigger_auto_collect",
+        label = ChooseTranslationTable(STRINGS_AQ.CONFIG.PICK_ACTION_TRIGGER_AUTO_COLLECT),
+        options = boolean,
+        default = false
     },
     {
         name = "enable_auto_collect",
