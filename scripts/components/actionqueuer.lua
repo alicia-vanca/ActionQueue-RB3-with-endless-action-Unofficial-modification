@@ -717,6 +717,14 @@ if TUNING.ACTION_QUEUE_PICK_ACTION_TRIGGER_AUTO_COLLECT then
     AddActionList("autocollect", "CHOP", "DIG", "HAMMER", "HARVEST", "MINE", "PICK", "PICKUP", "RESETMINE", "SCYTHE")
 else
     AddActionList("autocollect", "CHOP", "DIG", "HAMMER", "HARVEST", "MINE", "RESETMINE", "SCYTHE")
+
+    AddAction(
+        "autocollect",
+        "PICK",
+        function(target)
+            return target.prefab == "tumbleweed"
+        end
+    )
 end
 AddAction(
     "autocollect",
@@ -2039,7 +2047,7 @@ function GetSameThingChecker(target, action)
     elseif ACTIONS.TAKEITEM == target.action and target.prefab == "gelblob_storage" then
         -- 250222 VanCa: only take identical items from nearby gelblob_storage(s)
         return function(ent)
-            return ent.prefab == target.prefab and ent.takeitem and
+            return ent.prefab == target.prefab and ent.takeitem and ent.takeitem:value() and
                 ent.takeitem:value().prefab == target.takeitem:value().prefab
         end
     elseif
