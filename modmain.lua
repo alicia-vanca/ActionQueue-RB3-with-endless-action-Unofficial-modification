@@ -323,6 +323,11 @@ AddComponentPostInit(
                          then
                             ActionQueuer:StartAutoFisher(target)
                         elseif not ActionQueuer.auto_fishing then
+                            -- 260419 VanCa: Setup WxCanSpin flag
+                            if inst.GetModuleTypeCount then
+                                ActionQueuer.WxCanSpin = inst:GetModuleTypeCount("spin") > 0
+                            end
+
                             ActionQueuer:OnDown(mouse_control)
                         end
                         return

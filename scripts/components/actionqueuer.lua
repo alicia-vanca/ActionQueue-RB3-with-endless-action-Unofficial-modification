@@ -666,9 +666,9 @@ AddActionList(
     "LIGHT",
     "ERASE_PAPER", -- 250114 VanCa: Added ERASE_PAPER to noworkdelay list
     "DRAW_FROM_DECK", -- 250114 VanCa: Added
-    "REMOVELUNARBUILDUP" -- 250921 VanCa: Added
-    --"STORE" -- 250922 VanCa: Added, hope it won't cause any issue
-    -- 260322 VanCa: Removed STORE, long wait prevents duplicate failed actions on invalid storage
+    "REMOVELUNARBUILDUP", -- 250921 VanCa: Added
+    --"STORE" -- 250922 VanCa: Added. 260322 VanCa: Removed, long wait prevents duplicate failed actions on invalid storage
+    "PICK" -- 260419 VanCa: Added, hope it won't cause any issue
 )
 
 AddAction(
@@ -721,8 +721,12 @@ else
     AddAction(
         "autocollect",
         "PICK",
-        function(target)
-            return target.prefab == "tumbleweed"
+        function(target, self)
+            -- Skip detailed processing for compatibility with QuickAction for ActionQueue (2753482847)
+            if not self then
+                return target.prefab == "tumbleweed"
+            end
+            return target.prefab == "tumbleweed" or self.WxCanSpin
         end
     )
 end
@@ -800,6 +804,8 @@ local ActionQueuer =
         self.AddAction = AddAction
         self.AddActionList = AddActionList
         self.RemoveActionList = RemoveActionList
+        self.WxCanSpin = false
+        self.is_button_holding = false
         DebugPrint("ActionQueuer initialize")
     end
 )
@@ -1511,6 +1517,24 @@ function ActionQueuer:SendAction(act, rightclick, target)
         controlmods = 10 --force stack and force attack
     end
 
+    local is_released = true -- click release
+    if self.WxCanSpin and table.contains({"CHOP", "MINE"}, act.action.id) then
+        is_released = false
+	
+        local dist_sq = self.inst:GetDistanceSqToInst(target)
+        local phys_rad = target.Physics and target.Physics:GetRadius() or 0.25
+        local max_range = TUNING.WX78_SPIN_RADIUS + phys_rad
+        if dist_sq > (max_range * max_range) then
+            -- Cancel spin when too far from target
+            local target_pos = target:GetPosition()
+            SendRPCToServer(RPC.LeftClick, ACTIONS.WALKTO.code, target_pos.x, target_pos.z, nil, true)
+            Sleep(self.action_delay)
+            DebugPrint("click WALKTO to cancel spin")
+        end
+    end
+    DebugPrint("is_released:", is_released)
+    self.is_button_holding = not is_released
+
     if playercontroller.locomotor then
         act.preview_cb = function()
             if rightclick then
@@ -1521,7 +1545,7 @@ function ActionQueuer:SendAction(act, rightclick, target)
                     pos.z,
                     target,
                     act.rotation,
-                    true,
+                    is_released,
                     nil,
                     nil,
                     act.action.mod_name
@@ -1533,7 +1557,7 @@ function ActionQueuer:SendAction(act, rightclick, target)
                     pos.x,
                     pos.z,
                     target,
-                    true,
+                    is_released,
                     controlmods,
                     nil,
                     act.action.mod_name
@@ -1550,7 +1574,7 @@ function ActionQueuer:SendAction(act, rightclick, target)
                 pos.z,
                 target,
                 act.rotation,
-                true,
+                is_released,
                 nil,
                 act.action.canforce,
                 act.action.mod_name
@@ -1562,7 +1586,7 @@ function ActionQueuer:SendAction(act, rightclick, target)
                 pos.x,
                 pos.z,
                 target,
-                true,
+                is_released,
                 controlmods,
                 act.action.canforce,
                 act.action.mod_name
@@ -3517,12 +3541,12 @@ function ActionQueuer:ApplyToSelection()
                         DebugPrint("current_action:", current_action.id)
                         while IsValidEntity(target) and self.selected_ents[target] ~= nil do
                             DebugPrint("target is valid")
-                            local act = self:GetAction(target, rightclick, pos)
+                            local act_2 = self:GetAction(target, rightclick, pos)
                             -- 250921 VanCa: Continue to auto dig up stump while chopping if it doesn't require changing tool (Werebeaver)
                             if
-                                not act or
-                                    (act.action ~= current_action and
-                                        not (current_action == ACTIONS.CHOP and act.action == ACTIONS.DIG))
+                                not act_2 or
+                                    (act_2.action ~= current_action and
+                                        not (current_action == ACTIONS.CHOP and act_2.action == ACTIONS.DIG))
                              then
                                 DebugPrint("no action to perform")
                                 if active_item then
@@ -3559,27 +3583,27 @@ function ActionQueuer:ApplyToSelection()
                                             ) or active_item
                                         end
                                         -- Sleep(self.action_delay)
-                                        act = self:GetAction(target, rightclick, pos)
+                                        act_2 = self:GetAction(target, rightclick, pos)
                                     end
                                 elseif tool_action and self:WaitToolReEquip() then
                                     DebugPrint("tool_action and self:WaitToolReEquip()")
-                                    act = self:GetAction(target, rightclick, pos)
+                                    act_2 = self:GetAction(target, rightclick, pos)
                                 end
-                                if not act then
-                                    DebugPrint("not act. stop repeat")
+                                if not act_2 then
+                                    DebugPrint("not act_2. stop repeat")
                                     break
                                 end
                             end
 
                             -- 250921 VanCa: Continue to auto dig up stump while chopping if it doesn't require changing tool (Werebeaver)
                             if
-                                act.action ~= current_action and
-                                    not (current_action == ACTIONS.CHOP and act.action == ACTIONS.DIG)
+                                act_2.action ~= current_action and
+                                    not (current_action == ACTIONS.CHOP and act_2.action == ACTIONS.DIG)
                              then
-                                DebugPrint("act.action ~= current_action")
+                                DebugPrint("act_2.action ~= current_action")
                                 break
                             end
-                            self:SendActionAndWait(act, rightclick, target)
+                            self:SendActionAndWait(act_2, rightclick, target)
                         end
                     end
                     DebugPrint("The action is done with the entity")
@@ -3874,6 +3898,23 @@ end
 function ActionQueuer:ClearActionThread()
     DebugPrint("-------------------------------------")
     DebugPrint("ClearActionThread")
+
+    if self.is_button_holding then
+        self.is_button_holding = false
+        -- Spawn a background thread strictly for the cleanup and waiting
+        self.inst:StartThread(
+            function()
+                local player_pos = self.inst:GetPosition()
+                SendRPCToServer(RPC.LeftClick, ACTIONS.WALKTO.code, player_pos.x, player_pos.z, nil, true)
+
+                while GetAnimation(ThePlayer):match("^wx_spin_attack") do
+                    SendRPCToServer(RPC.LeftClick, ACTIONS.WALKTO.code, player_pos.x, player_pos.z, nil, true)
+                    Sleep(self.action_delay)
+                end
+            end
+        )
+    end
+
     if self.action_thread then
         DebugPrint("Thread cleared:", self.action_thread.id)
         KillThreadsWithID(self.action_thread.id)
@@ -3887,9 +3928,9 @@ end
 function ActionQueuer:ClearAllThreads()
     DebugPrint("-------------------------------------")
     DebugPrint("ClearAllThreads")
-    self:ClearActionThread()
     self:ClearSelectionThread()
     self:ClearSelectedEntities()
+    self:ClearActionThread()
     self.selection_widget:Kill()
 end
 
