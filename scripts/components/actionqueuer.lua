@@ -131,11 +131,13 @@ AddAction(
     "allclick",
     "CHOP",
     function(target)
-        -- 250512 VanCa: Prevent chopping short palmcone tree
+        -- 250512 VanCa: Prevent chopping short palmcone tree,
+        -- 260426 VanCa: Prevent chopping burning tree
         return not (target.prefab == "palmconetree" and
             (target.AnimState:IsCurrentAnimation("idle_short") or
                 target.AnimState:IsCurrentAnimation("sway1_loop_short") or
-                target.AnimState:IsCurrentAnimation("sway2_loop_short")))
+                target.AnimState:IsCurrentAnimation("sway2_loop_short")) or
+            target:HasTag("fire"))
     end
 )
 
@@ -723,10 +725,11 @@ else
         "PICK",
         function(target, self)
             -- Skip detailed processing for compatibility with QuickAction for ActionQueue (2753482847)
+            -- 260428 VanCa: added support for WX spin autocollect berrybush_juicy
             if not self then
-                return target.prefab == "tumbleweed"
+                return target.prefab == "tumbleweed" or target.prefab == "berrybush_juicy"
             end
-            return target.prefab == "tumbleweed" or self.WxCanSpin
+            return target.prefab == "tumbleweed" or target.prefab == "berrybush_juicy" or self.WxCanSpin
         end
     )
 end
@@ -1238,6 +1241,8 @@ function ActionQueuer:TakeActiveItemFromAllOfSlot(cont, slot, item_data)
             DebugPrint("ReturnActiveItem short wait: ", count - math.floor(count / 5))
         end
         count = count + 1
+        -- 260428 VanCa: fix endless while loop
+        active_item = self:GetActiveItem()
     end
     local container = self:GetContainer(cont)
     if container then
@@ -1520,7 +1525,7 @@ function ActionQueuer:SendAction(act, rightclick, target)
     local is_released = true -- click release
     if self.WxCanSpin and table.contains({"CHOP", "MINE"}, act.action.id) then
         is_released = false
-	
+
         local dist_sq = self.inst:GetDistanceSqToInst(target)
         local phys_rad = target.Physics and target.Physics:GetRadius() or 0.25
         local max_range = TUNING.WX78_SPIN_RADIUS + phys_rad
@@ -1959,7 +1964,7 @@ end
 -- 250924 VanCa: Simplify DoubleClick checks
 function GetSameThingChecker(target, action)
     DebugPrint("-------------------------------------")
-    DebugPrint("GetSameThingChecker")
+    DebugPrint("GetSameThingChecker, target:", tostring(target), "anim:", GetAnimation(target))
 
     if ACTIONS.REMOVELUNARBUILDUP == action then
         -- 250919 VanCa: Select all nearby prefab (that has lunar hail builded-up)
@@ -2018,7 +2023,13 @@ function GetSameThingChecker(target, action)
                     "moon_tree", -- 210322 null: lvl 3 lune trees
                     "twiggytree", -- 210322 null: lvl 3 twiggy trees
                     "palmconetree", -- 221010 cutlass: lvl 3 palmcone treesv
-                    "evergreen_sparse" -- 240930 VanCa: lvl 3 Lumpy Evergreen | Cutlass updated this in ver 2.8
+                    "evergreen_sparse", -- 240930 VanCa: lvl 3 Lumpy Evergreen | Cutlass updated this in ver 2.8
+                    "cherry_tree", -- 260426 VanCa: lvl 3 Cherry Tree (Cherry Forest mod)
+                    "cherry_tree_white",
+                    "chengbaoshishu", -- 260426 VanCa: lvl 3 Gem Tree (Terraria mod)
+                    "zibaoshishu",
+                    "lvbaoshishu",
+                    "huangbaoshishu"
                 },
                 target.prefab
             ) and
@@ -3215,7 +3226,7 @@ function ActionQueuer:GetClosestTarget(active_item)
     repeat
         -- From nearest to farthest
         -- Iterating from the last element to the first to avoid the issue of shifting indices
-        local state = {targets, is_active_item_changed = false}
+        local state = {targets = targets, is_active_item_changed = false}
         for i = #self.selected_ents_sortable, 1, -1 do
             local ent = self.selected_ents_sortable[i]
             if IsValidEntity(ent) then
@@ -3312,7 +3323,7 @@ function ActionQueuer:GetClosestTarget(active_item)
                         elseif ent.AnimState:IsCurrentAnimation("idle_open") or ent.AnimState:IsCurrentAnimation("idle") then
                             -- if this desalinator is ready to collect clean water but we're not holding a bucket
                             -- then make sure we're holding a bucket
-                            if self:TakeBucket() then
+                            if self:TakeBucket(state) then
                                 DebugPrint("Now we're holding a bucket")
                             else
                                 -- If we don't have any bucket left
