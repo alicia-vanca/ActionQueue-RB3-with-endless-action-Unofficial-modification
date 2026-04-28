@@ -765,7 +765,8 @@ AddAction(
             target:HasTag("donotautopick") or
             target:HasTag("backpack")) and
             target:HasTag("_inventoryitem") and
-            target.prefab ~= "amulet"
+            target.prefab ~= "amulet" or
+            target.prefab == "lightbulb" -- 260428 VanCa: added support for WX spin autocollect lightbub
     end
 )
 
