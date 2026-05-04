@@ -2248,7 +2248,11 @@ function ActionQueuer:CherryPick(rightclick)
         if ent.takeitem then
             DebugPrint("ent.takeitem:", ent.takeitem:value())
         end
-        DebugPrint("DebugString:", ent:GetDebugString())
+        if (ent.prefab ~= "wx78") then
+            DebugPrint("DebugString:", ent:GetDebugString())
+        else
+            DebugPrint("DebugString: wx78 - debugprint crash")
+        end
         if self.selected_ents[ent] ~= nil then
             -- Make manual deselect easier
             self:DeselectEntity(ent)
