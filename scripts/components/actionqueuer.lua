@@ -1528,7 +1528,7 @@ function ActionQueuer:SendAction(act, rightclick, target)
         is_released = false
 
         local dist_sq = self.inst:GetDistanceSqToInst(target)
-        local phys_rad = target.Physics and target.Physics:GetRadius() or 0.25
+        local phys_rad = target.physicsradiusoverride or (target.Physics and target.Physics:GetRadius()) or 0.25
         local max_range = TUNING.WX78_SPIN_RADIUS + phys_rad
         if dist_sq > (max_range * max_range) then
             -- Cancel spin when too far from target
@@ -2080,6 +2080,10 @@ function GetSameThingChecker(target, action)
             return ent.prefab == target.prefab and
                 (ent.AnimState:IsCurrentAnimation("idle_tall") or ent.AnimState:IsCurrentAnimation("hit_tall"))
         end
+    elseif ACTIONS.MINE == target.action and (target.prefab:match("^grotto")) then -- Mine all pond & waterfall moonglass in Lunar Grotto
+        return function(ent)
+            return ent.prefab:match("^grotto")
+        end
     elseif ACTIONS.TAKEITEM == target.action and target.prefab == "gelblob_storage" then
         -- 250222 VanCa: only take identical items from nearby gelblob_storage(s)
         return function(ent)
@@ -2429,9 +2433,12 @@ function ActionQueuer:OnUp(rightclick)
                     self:DeployToSelection(self.WaterAtPoint, 4, equip_item) -- 201217 null: Water multiple tiles
                 end
             elseif
+                -- 260617 VanCa: Add support for Heated Garden Hoe
                 equip_item and
                     (equip_item.prefab == "farm_hoe" or equip_item.prefab == "golden_farm_hoe" or
-                        equip_item.prefab == "shovel_lunarplant")
+                        equip_item.prefab == "shovel_lunarplant" or
+                        equip_item.prefab == "quagmire_hoe" or
+                        equip_item.prefab == "fumarole_farm_hoe")
              then
                 self:DeployToSelection(self.TillAtPoint, farm_spacing, equip_item)
             end
