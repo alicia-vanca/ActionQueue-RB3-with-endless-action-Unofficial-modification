@@ -63,11 +63,12 @@ function to_string(tbl)
 end
 
 local DebugPrint = TUNING.ACTION_QUEUE_DEBUG_MODE and function(...)
+        local args = {...}
         local msg = "[ActionQueue]"
-        for i = 1, arg.n do
-            msg = msg .. " " .. to_string(arg[i])
+        for i = 1, #args do
+            msg = msg .. " " .. to_string(args[i])
         end
-        if arg.n > 1 then
+        if #args > 1 then
             msg = msg .. "\n"
         end
 
